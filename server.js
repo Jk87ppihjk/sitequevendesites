@@ -1,0 +1,53 @@
+// server.js
+const express = require('express');
+const dotenv = require('dotenv');
+const cors = require('cors');
+
+// Configuração de Variáveis de Ambiente
+dotenv.config();
+
+// Módulos Internos
+const { connectDB } = require('./database');
+const models = require('./models');
+
+// Controladores de Rotas
+const authRoutes = require('./authController');
+const siteRoutes = require('./siteController');
+const orderRoutes = require('./orderController');
+const paymentRoutes = require('./paymentController');
+
+const app = express();
+
+// --- Conexão com o Banco de Dados ---
+connectDB(models);
+
+// --- Middlewares ---
+app.use(express.json()); // Body parser para JSON
+app.use(express.urlencoded({ extended: true })); // Body parser para formulários
+app.use(cors({
+    origin: process.env.FRONTEND_URL, // Permite apenas requisições do seu frontend
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true,
+}));
+
+// --- Rotas da API ---
+app.use('/api/auth', authRoutes);
+app.use('/api/sites', siteRoutes);
+app.use('/api/orders', orderRoutes);
+app.use('/api/payment', paymentRoutes);
+
+// --- Rota de Teste ---
+app.get('/', (req, res) => {
+    res.send('API SoleMates Rodando! Conectada com MySQL e Cloudinary.');
+});
+
+// --- Rota 404/Erro ---
+app.use((req, res, next) => {
+    res.status(404).json({ message: `Rota não encontrada: ${req.originalUrl}` });
+});
+
+// --- Inicialização do Servidor ---
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
+});
