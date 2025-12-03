@@ -32,16 +32,18 @@ const initializeApp = async () => {
     try {
         await connectDB();
         
-        // ATENÇÃO: Use { force: true } APENAS NESTA ETAPA DE CORREÇÃO.
-        // Depois de logar, mude para { alter: true } ou remova o force/alter para evitar perda de dados.
-        console.log('🔄 Sincronizando banco de dados (FORCE mode)...');
-        await sequelize.sync({ force: true }); 
-        console.log('✅ Banco de dados recriado e sincronizado com sucesso.');
+        // CORREÇÃO CRÍTICA: Removendo o { force: true } que apagava o banco
+        // a cada inicialização. Usamos { alter: true } para aplicar migrações
+        // de schema sem perder dados.
+        console.log('🔄 Sincronizando banco de dados (ALTER mode)...');
+        await sequelize.sync({ alter: true }); 
+        console.log('✅ Banco de dados sincronizado com sucesso.');
 
         // --- LÓGICA DE CRIAÇÃO DO ADMIN (SEEDER) ---
         const models = global.solematesModels;
         const adminEmail = 'admin@solemate.com';
         
+        // Esta linha garante que o admin só será criado se não existir
         const adminExists = await models.User.findOne({ where: { email: adminEmail } });
 
         if (!adminExists) {
@@ -82,11 +84,18 @@ app.use(cors({
 }));
 
 // --- Rotas da API ---
+const authRoutes = require('./authController');
+const siteRoutes = require('./siteController');
+const orderRoutes = require('./orderController');
+const paymentRoutes = require('./paymentController');
+const customizationRoutes = require('./customizationController');
+const fileRoutes = require('./fileController');
+
 app.use('/api/auth', authRoutes);
 app.use('/api/sites', siteRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/payment', paymentRoutes);
-app.use('/api/customization', customizationRoutes);
+app.use('/api/customization', customizationController);
 app.use('/api/files', fileRoutes); 
 
 app.get('/', (req, res) => {
