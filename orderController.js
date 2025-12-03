@@ -1,9 +1,12 @@
 // orderController.js
 const express = require('express');
 const router = express.Router();
-const models = require('./models');
+// const models = require('./models'); // LINHA ORIGINAL REMOVIDA
 const { protect, admin } = require('./authMiddleware'); // Importando middleware de admin
 const mercadopago = require('./mp'); // Seu arquivo mp.js configurado
+
+// CORREÇÃO: Acessa o objeto de modelos inicializados via global
+const models = global.solematesModels;
 
 // --- 1. Criar Preferência de Pagamento (Checkout) ---
 const createOrder = async (req, res) => {
