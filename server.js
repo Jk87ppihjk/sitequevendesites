@@ -24,11 +24,15 @@ connectDB(models);
 // --- Middlewares ---
 app.use(express.json()); // Body parser para JSON
 app.use(express.urlencoded({ extended: true })); // Body parser para formulários
+
+// --- CONFIGURAÇÃO CORS PERMISSIVA (PARA QUALQUER ORIGEM) ---
+// Aviso: Em produção, é mais seguro especificar domínios.
 app.use(cors({
-    origin: process.env.FRONTEND_URL, // Permite apenas requisições do seu frontend
+    origin: '*', // Permite qualquer domínio
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
 }));
+// -----------------------------------------------------------
 
 // --- Rotas da API ---
 app.use('/api/auth', authRoutes);
