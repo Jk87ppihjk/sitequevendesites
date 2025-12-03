@@ -6,12 +6,8 @@ let User;
 let Site;
 let Comment;
 let Order; 
-let SystemConfig; // Modelo de Configuração
+let SystemConfig; 
 
-/**
- * Função para definir todos os modelos e suas associações.
- * @param {import('sequelize').Sequelize} sequelize A instância do Sequelize conectada.
- */
 function initModels(sequelize) {
     // --- 1. User Model ---
     User = sequelize.define('User', {
@@ -42,7 +38,6 @@ function initModels(sequelize) {
         },
     }, {
         hooks: {
-            // Hash da senha antes de salvar no banco de dados
             beforeCreate: async (user) => {
                 const salt = await bcrypt.genSalt(10);
                 user.password = await bcrypt.hash(user.password, salt);
@@ -92,7 +87,6 @@ function initModels(sequelize) {
                 isUrl: true,
             }
         },
-        // Links adicionais serão armazenados como JSON string
         additional_links: {
             type: DataTypes.JSON, 
             allowNull: true,
@@ -172,19 +166,27 @@ function initModels(sequelize) {
             autoIncrement: true, 
             primaryKey: true,
         },
-        site_id: { // CHAVE ESTRANGEIRA para o Site
+        site_id: { 
             type: DataTypes.INTEGER,
             allowNull: false,
-            unique: true, // Garante apenas 1 config por site
-            // CORRIGIDO: Removida a definição manual 'references' para evitar o erro 150.
-            // A associação abaixo fará a criação correta.
+            unique: true, 
         },
         // Variáveis de Ambiente
-        mp_access_token: { type: DataTypes.STRING, allowNull: false },
-        frontend_url: { type: DataTypes.STRING, allowNull: false },
-        db_name: { type: DataTypes.STRING, allowNull: false },
-        db_user: { type: DataTypes.STRING, allowNull: false },
-        cloudinary_cloud_name: { type: DataTypes.STRING, allowNull: false },
+        mp_access_token: { type: DataTypes.STRING, allowNull: true }, // Set to true since client might not have it initially
+        frontend_url: { type: DataTypes.STRING, allowNull: true },
+
+        // NOVOS CAMPOS DB
+        db_host: { type: DataTypes.STRING, allowNull: true },
+        db_name: { type: DataTypes.STRING, allowNull: true },
+        db_user: { type: DataTypes.STRING, allowNull: true },
+        db_password: { type: DataTypes.STRING, allowNull: true },
+        
+        // NOVOS CAMPOS CLOUDINARY
+        cloudinary_cloud_name: { type: DataTypes.STRING, allowNull: true },
+        cloudinary_api_key: { type: DataTypes.STRING, allowNull: true },
+        cloudinary_api_secret: { type: DataTypes.STRING, allowNull: true },
+
+        // OUTROS
         brevo_api_key: { type: DataTypes.STRING, allowNull: true },
 
         // Estilo Visual
@@ -210,11 +212,9 @@ function initModels(sequelize) {
     Site.hasMany(Order, { foreignKey: 'site_id' });
     Order.belongsTo(Site, { foreignKey: 'site_id' });
 
-    // NOVO: Site 1:1 SystemConfig
     Site.hasOne(SystemConfig, { foreignKey: 'site_id' });
     SystemConfig.belongsTo(Site, { foreignKey: 'site_id' }); 
 
-    // Retorna todos os modelos definidos
     return {
         User,
         Site,
