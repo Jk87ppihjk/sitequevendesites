@@ -6,28 +6,27 @@ const { protect, admin } = require('./authMiddleware');
 
 /**
  * @route POST /api/customization
- * @desc Salva ou Atualiza a configuração do sistema (Variáveis e Estilo)
+ * @desc Salva ou Atualiza a configuração do sistema POR SITE
  * @access Private/Admin
  */
 const saveConfig = async (req, res) => {
-    // O payload deve incluir todos os campos do modal, incluindo o estilo visual
     const { 
+        siteId, // Novo campo obrigatório
         mpAccessToken, frontendUrl, dbName, 
         dbUser, cloudinaryName, brevoApiKey, 
         visualStyle 
     } = req.body;
 
-    // Validação mínima
-    if (!mpAccessToken || !frontendUrl || !visualStyle) {
-        return res.status(400).json({ message: 'Campos obrigatórios de configuração faltando.' });
+    if (!siteId || !mpAccessToken || !frontendUrl || !visualStyle) {
+        return res.status(400).json({ message: 'Campos obrigatórios de configuração faltando (incluindo siteId).' });
     }
 
     try {
-        // Como só deve haver uma configuração por sistema, usamos findOrCreate ou findOne + update.
-        // Vamos usar findOrCreate e depois atualizar o registro existente.
+        // Usa site_id para encontrar ou criar a configuração
         const [config, created] = await models.SystemConfig.findOrCreate({
-            where: { id: 1 }, // Garantindo que sempre tentamos usar o registro de ID 1
+            where: { site_id: siteId },
             defaults: {
+                site_id: siteId,
                 mp_access_token: mpAccessToken,
                 frontend_url: frontendUrl,
                 db_name: dbName,
@@ -51,7 +50,7 @@ const saveConfig = async (req, res) => {
             });
         }
 
-        res.json({ message: 'Configuração salva com sucesso!', config: config });
+        res.json({ message: `Configuração salva com sucesso para o Site ID ${siteId}!`, config: config });
 
     } catch (error) {
         console.error('Erro ao salvar configuração:', error);
@@ -61,19 +60,26 @@ const saveConfig = async (req, res) => {
 
 /**
  * @route GET /api/customization
- * @desc Obtém a configuração atual do sistema
+ * @desc Obtém a configuração atual do sistema POR SITE
  * @access Private/Admin
  */
 const getConfig = async (req, res) => {
+    const { siteId } = req.query; // Espera siteId nos query params
+
+    if (!siteId) {
+        return res.status(400).json({ message: 'Site ID é obrigatório.' });
+    }
+    
     try {
-        const config = await models.SystemConfig.findByPk(1, {
-            // Exclui a chave secreta do JWT por segurança, caso ela seja adicionada no futuro, 
-            // mas por enquanto, envia tudo.
+        // Busca a configuração pelo site_id
+        const config = await models.SystemConfig.findOne({
+            where: { site_id: siteId },
             attributes: { exclude: ['id', 'created_at', 'updated_at'] } 
         });
 
         if (!config) {
-            return res.status(404).json({ message: 'Nenhuma configuração encontrada.' });
+            // Retorna 404 se não houver configuração, o frontend lidará com isso
+            return res.status(404).json({ message: `Nenhuma configuração encontrada para o Site ID ${siteId}.` });
         }
 
         res.json(config);
@@ -85,7 +91,6 @@ const getConfig = async (req, res) => {
 };
 
 // --- Definição das Rotas de Personalização ---
-// Rotas protegidas por 'protect' e restritas a 'admin'
 router.post('/', protect, admin, saveConfig);
 router.get('/', protect, admin, getConfig);
 
