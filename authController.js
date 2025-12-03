@@ -10,6 +10,8 @@ const models = global.solematesModels;
 
 /**
  * Gera um token JWT para o usuário, incluindo ID, email e nome completo (fullName).
+ * @param {object} user Objeto do usuário com id, full_name e email.
+ * @returns {string} Token JWT
  */
 const generateToken = (user) => {
     return jwt.sign({ 
@@ -40,6 +42,7 @@ const registerUser = async (req, res) => {
             return res.status(400).json({ message: 'Usuário já existe.' });
         }
 
+        // A criptografia da senha é tratada pelo hook beforeCreate no modelo User
         const user = await models.User.create({
             full_name: full_name,
             email,
@@ -125,6 +128,7 @@ const loginUser = async (req, res) => {
  */
 const getUserProfile = (req, res) => {
     // O req.user é definido pelo middleware 'protect'
+    // Ele contém id, email, fullName e role (baseado no token JWT)
     res.json(req.user);
 };
 
