@@ -5,8 +5,8 @@ const bcrypt = require('bcrypt');
 let User;
 let Site;
 let Comment;
-let Order;
-let SystemConfig; 
+let Order; 
+let SystemConfig; // Modelo de Configuração
 
 /**
  * Função para definir todos os modelos e suas associações.
@@ -42,6 +42,7 @@ function initModels(sequelize) {
         },
     }, {
         hooks: {
+            // Hash da senha antes de salvar no banco de dados
             beforeCreate: async (user) => {
                 const salt = await bcrypt.genSalt(10);
                 user.password = await bcrypt.hash(user.password, salt);
@@ -72,12 +73,12 @@ function initModels(sequelize) {
         },
         price_sale: {
             type: DataTypes.DECIMAL(10, 2),
-            allowNull: true,
+            allowNull: true, 
             defaultValue: 0.00
         },
         price_rent: {
             type: DataTypes.DECIMAL(10, 2),
-            allowNull: true,
+            allowNull: true, 
             defaultValue: 0.00
         },
         main_image_url: {
@@ -91,6 +92,7 @@ function initModels(sequelize) {
                 isUrl: true,
             }
         },
+        // Links adicionais serão armazenados como JSON string
         additional_links: {
             type: DataTypes.JSON, 
             allowNull: true,
@@ -134,7 +136,7 @@ function initModels(sequelize) {
         },
     });
 
-    // --- 4. Order Model ---
+    // --- 4. Order Model (para rastrear compras e aluguéis) ---
     Order = sequelize.define('Order', {
         id: {
             type: DataTypes.INTEGER,
@@ -163,21 +165,19 @@ function initModels(sequelize) {
         },
     });
     
-    // --- 5. SystemConfig Model (NOVO MODELO) ---
+    // --- 5. SystemConfig Model ---
     SystemConfig = sequelize.define('SystemConfig', {
         id: {
             type: DataTypes.INTEGER,
-            autoIncrement: true, // Auto-incrementing primary key
+            autoIncrement: true, 
             primaryKey: true,
         },
         site_id: { // CHAVE ESTRANGEIRA para o Site
             type: DataTypes.INTEGER,
             allowNull: false,
-            unique: true, // Garantindo apenas 1 config por site
-            references: {
-                model: 'Sites',
-                key: 'id',
-            }
+            unique: true, // Garante apenas 1 config por site
+            // CORRIGIDO: Removida a definição manual 'references' para evitar o erro 150.
+            // A associação abaixo fará a criação correta.
         },
         // Variáveis de Ambiente
         mp_access_token: { type: DataTypes.STRING, allowNull: false },
