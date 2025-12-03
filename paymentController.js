@@ -1,11 +1,14 @@
 // paymentController.js
 const express = require('express');
 const router = express.Router();
-const models = require('./models');
+// const models = require('./models'); // LINHA ORIGINAL REMOVIDA
 const { mercadopagoClient } = require('./mp'); 
 const { protect } = require('./authMiddleware');
 // Importa as classes necessárias do Mercado Pago SDK V2
 const { Preference, Payment } = require('mercadopago'); 
+
+// CORREÇÃO: Acessa o objeto de modelos inicializados via global
+const models = global.solematesModels;
 
 /**
  * @route POST /api/payment/create-preference
