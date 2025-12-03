@@ -16,15 +16,27 @@ const createPreference = async (req, res) => {
     const { siteId, purchaseType, price, siteName, customer } = req.body;
     const userId = req.user.id;
 
-    const transactionPrice = parseFloat(price);
-    if (isNaN(transactionPrice) || transactionPrice < 1) {
-        return res.status(400).json({ message: "O valor mínimo permitido pelo Mercado Pago é R$ 1,00." });
+    console.log("RECEBIDO DO FRONT:", price, typeof price);
+
+    // Conversão correta
+    const transactionPrice = Number(price);
+
+    // Validação final
+    if (!transactionPrice || isNaN(transactionPrice) || transactionPrice < 1) {
+        return res.status(400).json({ 
+            message: "O valor mínimo permitido pelo Mercado Pago é R$ 1,00." 
+        });
     }
+
+    // Parse CPF/CNPJ
+    const rawDoc = customer.cpfCnpj.replace(/\D/g, '');
+    const isCnpj = rawDoc.length > 11;
 
     try {
         const site = await models.Site.findByPk(siteId);
         if (!site) return res.status(404).json({ message: 'Site não encontrado.' });
 
+        // Cria pedido interno
         const order = await models.Order.create({
             user_id: userId,
             site_id: siteId,
@@ -40,24 +52,22 @@ const createPreference = async (req, res) => {
             body: {
                 items: [
                     {
-                        title: purchaseType === 'sale' ? `Compra do Site: ${siteName}` : `Aluguel (30 dias) do Site: ${siteName}`,
-                        unit_price: transactionPrice,
+                        title: purchaseType === 'sale'
+                            ? `Compra do Site: ${siteName}`
+                            : `Aluguel (30 dias) do Site: ${siteName}`,
+                        unit_price: Number(transactionPrice),
                         quantity: 1,
-                        currency_id: 'BRL',
+                        currency_id: 'BRL'
                     }
                 ],
 
                 payer: {
                     name: customer.fullName,
                     email: customer.email,
-                    entity_type: "individual", // Fix obrigatório
+                    entity_type: isCnpj ? "association" : "individual",
                     identification: {
-                        type: "CPF",
-                        number: customer.cpf ? customer.cpf : "00000000000"
-                    },
-                    phone: {
-                        area_code: "11",
-                        number: "999999999"
+                        type: isCnpj ? "CNPJ" : "CPF",
+                        number: rawDoc
                     },
                     address: {
                         zip_code: customer.address.zipCode,
@@ -82,10 +92,13 @@ const createPreference = async (req, res) => {
         order.mp_preference_id = mpResponse.id;
         await order.save();
 
-        res.json({ preferenceId: mpResponse.id, initPoint: mpResponse.init_point });
+        res.json({
+            preferenceId: mpResponse.id,
+            initPoint: mpResponse.init_point
+        });
 
     } catch (error) {
-        console.error(error);
+        console.error("ERRO NO CREATE-PREFERENCE:", error);
         res.status(500).json({ message: 'Erro interno ao criar preferência.' });
     }
 };
@@ -101,6 +114,7 @@ const handleWebhook = async (req, res) => {
         try {
             const paymentModule = new Payment(mercadopagoClient);
             const payment = await paymentModule.get({ id: paymentId });
+
             const orderId = payment.external_reference;
             if (!orderId) return res.status(200).send('OK');
 
@@ -111,18 +125,24 @@ const handleWebhook = async (req, res) => {
 
             if (payment.status === 'approved') {
                 newStatus = order.purchase_type === 'rent' ? 'rented' : 'completed';
+
                 if (order.purchase_type === 'rent') {
-                    order.rent_expiry_date = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+                    order.rent_expiry_date = new Date(Date.now() + 30*24*60*60*1000);
                 }
-            } else if (payment.status === 'rejected') newStatus = 'rejected';
-            else if (payment.status === 'pending') newStatus = 'pending';
+
+            } else if (payment.status === 'pending') {
+                newStatus = 'pending';
+
+            } else if (payment.status === 'rejected') {
+                newStatus = 'rejected';
+            }
 
             order.status = newStatus;
             await order.save();
             return res.status(200).send('OK');
 
         } catch (error) {
-            console.error(error);
+            console.error("ERRO NO WEBHOOK:", error);
             return res.status(500).send('Erro interno.');
         }
     }
@@ -134,75 +154,3 @@ router.post('/create-preference', protect, createPreference);
 router.post('/webhook', handleWebhook);
 router.get('/webhook', (req, res) => res.send('Webhook ativo. Use POST.'));
 module.exports = router;
-
-
-// ==========================
-// FRONTEND (Checkout + Brick)
-// ==========================
-
-/* HTML/JS corrigido:
-
-<div id="paymentBrick_container"></div>
-
-<script src="https://sdk.mercadopago.com/js/v2"></script>
-<script>
-
-const mp = new MercadoPago("TEST-9b3e3f41-e7a3-4868-9545-61e87d256dd1", {
-    locale: 'pt-BR'
-});
-
-async function startCheckout() {
-    const response = await fetch(`/api/payment/create-preference`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-            siteId: 1,
-            purchaseType: 'rent',
-            price: 1.00, // 🔥 Não pode ser menos de 1 real
-            siteName: 'Meu Site',
-            customer: {
-                fullName: "Cliente Teste",
-                cpf: "12345678900",
-                email: "cliente@email.com",
-                address: {
-                    zipCode: "01001000",
-                    streetName: "Av Paulista",
-                    streetNumber: "1000"
-                }
-            }
-        })
-    });
-
-    const data = await response.json();
-
-    if (!data.preferenceId) {
-        console.error("Falha ao criar preferência", data);
-        return;
-    }
-
-    const bricks = mp.bricks();
-
-    bricks.create('payment', 'paymentBrick_container', {
-        initialization: {
-            preferenceId: data.preferenceId,
-            amount: 1.00
-        },
-        customization: {
-            paymentMethods: {
-                ticket: 'all',
-                creditCard: 'all'
-            }
-        },
-        callbacks: {
-            onReady: () => console.log("Brick carregado"),
-            onError: error => console.error("Brick error", error)
-        }
-    });
-}
-
-startCheckout();
-</script>
-*/
