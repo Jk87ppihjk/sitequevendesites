@@ -2,11 +2,12 @@
 const express = require('express');
 const router = express.Router();
 const models = require('./models');
-const { admin } = require('./authMiddleware');
+// CORREÇÃO 1: Importar 'protect' também
+const { protect, admin } = require('./authMiddleware');
 const { cloudinary } = require('./cloudinary');
 const multer = require('multer');
 
-// Configuração do Multer para upload em memória (necessário para Cloudinary)
+// Configuração do Multer para upload em memória
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
@@ -20,6 +21,7 @@ const createSite = async (req, res) => {
     const imageFile = req.file; 
     const { name, description, priceSale, priceRent, siteLink, additionalLinks } = req.body;
 
+    // Validação básica
     if (!imageFile || !name || !description || !siteLink) {
         return res.status(400).json({ message: 'Campos obrigatórios faltando (Imagem, Nome, Descrição, Link do Site).' });
     }
@@ -27,20 +29,18 @@ const createSite = async (req, res) => {
     try {
         // 1. Upload da imagem para o Cloudinary
         const result = await cloudinary.uploader.upload(`data:image/jpeg;base64,${imageFile.buffer.toString('base64')}`, {
-            folder: 'solemates_sites', // Pasta no Cloudinary
+            folder: 'solemates_sites',
             allowed_formats: ['jpg', 'png', 'jpeg'],
         });
 
         const mainImageUrl = result.secure_url;
 
-        // 2. Processa links adicionais (assumindo que vêm como uma string JSON ou CSV)
+        // 2. Processa links adicionais
         let processedLinks = [];
         if (additionalLinks) {
             try {
-                // Tenta fazer o parse como JSON (formato recomendado)
                 processedLinks = JSON.parse(additionalLinks);
             } catch (e) {
-                // Se falhar, tenta separar por vírgula como fallback
                 processedLinks = additionalLinks.split(',').map(link => link.trim());
             }
         }
@@ -53,7 +53,7 @@ const createSite = async (req, res) => {
             price_rent: priceRent || 0.00,
             main_image_url: mainImageUrl,
             site_link: siteLink,
-            additional_links: processedLinks, // Salva como JSON
+            additional_links: processedLinks,
         });
 
         res.status(201).json(site);
@@ -101,7 +101,6 @@ const getSiteDetails = async (req, res) => {
         });
 
         if (site) {
-            // Calcula a média de avaliação
             const totalRating = site.Comments.reduce((sum, comment) => sum + comment.rating, 0);
             const averageRating = site.Comments.length > 0 ? (totalRating / site.Comments.length).toFixed(1) : 0;
             
@@ -119,17 +118,13 @@ const getSiteDetails = async (req, res) => {
     }
 };
 
+// --- ROTAS ---
 
-// --- Definição das Rotas de Sites ---
 router.get('/', getSites);
 router.get('/:id', getSiteDetails);
 
-// Rota de criação de site (requer upload de arquivo e admin)
-router.post('/', admin, upload.single('image'), createSite);
-
-// Adicionar rotas de PUT/DELETE para Admin, se necessário
-// router.put('/:id', protect, admin, ...);
-// router.delete('/:id', protect, admin, ...);
-
+// CORREÇÃO 2: Adicionar 'protect' antes de 'admin'
+// Sem 'protect', o req.user não existe e o 'admin' sempre retorna 403.
+router.post('/', protect, admin, upload.single('image'), createSite);
 
 module.exports = router;
