@@ -17,7 +17,9 @@ function initModels(sequelize) {
         password: { type: DataTypes.STRING, allowNull: false },
         role: { type: DataTypes.ENUM('user', 'admin'), defaultValue: 'user' },
     }, {
-        underscored: true, // Mantido (assume-se que Users usa created_at/updated_at)
+        tableName: 'Users', // FORÇA o uso da tabela Users (Maiúsculo)
+        underscored: false, // Usa createdAt/updatedAt
+        timestamps: true,
         hooks: {
             beforeCreate: async (user) => {
                 const salt = await bcrypt.genSalt(10);
@@ -33,7 +35,6 @@ function initModels(sequelize) {
     });
 
     // --- 2. Site ---
-    // CORREÇÃO AQUI: Ajustado para bater com a tabela que tem 'createdAt' (camelCase)
     Site = sequelize.define('Site', {
         id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
         name: { type: DataTypes.STRING, allowNull: false },
@@ -45,8 +46,8 @@ function initModels(sequelize) {
         additional_links: { type: DataTypes.JSON, allowNull: true, defaultValue: [] },
         is_available: { type: DataTypes.BOOLEAN, defaultValue: true }
     }, {
-        // IMPORTANTE: Definido como false para buscar 'createdAt' e 'updatedAt' no banco
-        underscored: false, 
+        tableName: 'Sites', // FORÇA o uso da tabela Sites (Maiúsculo)
+        underscored: false, // Usa createdAt/updatedAt
         timestamps: true
     });
 
@@ -56,8 +57,9 @@ function initModels(sequelize) {
         rating: { type: DataTypes.INTEGER, allowNull: false },
         comment_text: { type: DataTypes.TEXT, allowNull: true },
     }, {
+        tableName: 'Comments', // FORÇA o uso da tabela Comments (Maiúsculo)
+        underscored: false, // Usa createdAt/updatedAt
         timestamps: true,
-        underscored: true, 
     });
 
     // --- 4. Order ---
@@ -69,14 +71,16 @@ function initModels(sequelize) {
         purchase_type: { type: DataTypes.ENUM('sale', 'rent'), allowNull: false },
         rent_expiry_date: { type: DataTypes.DATE, allowNull: true },
     }, {
-        underscored: true, 
+        tableName: 'Orders', // FORÇA o uso da tabela Orders (Maiúsculo)
+        underscored: false, // Usa createdAt/updatedAt
+        timestamps: true,
     });
     
     // --- 5. SystemConfig ---
     SystemConfig = sequelize.define('SystemConfig', {
         id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
         site_id: { type: DataTypes.INTEGER, allowNull: false },
-        user_id: { type: DataTypes.INTEGER, allowNull: false }, // Vínculo com Usuário
+        user_id: { type: DataTypes.INTEGER, allowNull: false }, 
         
         mp_access_token: { type: DataTypes.STRING, allowNull: true }, 
         frontend_url: { type: DataTypes.STRING, allowNull: true },
@@ -93,14 +97,14 @@ function initModels(sequelize) {
         brevo_api_key: { type: DataTypes.STRING, allowNull: true },
         visual_style: { type: DataTypes.TEXT, allowNull: true }, 
         
-        frontend_zip_url: { type: DataTypes.STRING, allowNull: true }, // Upload do Admin
+        frontend_zip_url: { type: DataTypes.STRING, allowNull: true },
     }, {
-        tableName: 'system_configs',
+        tableName: 'system_configs', // Mantém minúsculo pois parece ser uma tabela nova/específica
         timestamps: true,
         underscored: true,
     });
 
-    // Associações
+    // Associações (Mantendo os Foreign Keys explícitos para garantir o vínculo)
     User.hasMany(Comment, { foreignKey: 'user_id' });
     Comment.belongsTo(User, { foreignKey: 'user_id' });
 
