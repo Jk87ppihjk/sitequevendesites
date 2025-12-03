@@ -2,9 +2,10 @@
 const express = require('express');
 const router = express.Router();
 const models = require('./models');
-// Altera a importação para o novo nome
 const { mercadopagoClient } = require('./mp'); 
 const { protect } = require('./authMiddleware');
+// Importa as classes necessárias do Mercado Pago SDK V2
+const { Preference, Payment } = require('mercadopago'); 
 
 /**
  * @route POST /api/payment/create-preference
@@ -12,7 +13,8 @@ const { protect } = require('./authMiddleware');
  * @access Private
  */
 const createPreference = async (req, res) => {
-    const { siteId, purchaseType } = req.body;
+    // Adiciona destructuring para o corpo do checkout detalhado
+    const { siteId, purchaseType, price, siteName, paymentMethod, customer } = req.body;
     const userId = req.user.id;
 
     if (!siteId || !['sale', 'rent'].includes(purchaseType)) {
@@ -26,17 +28,11 @@ const createPreference = async (req, res) => {
             return res.status(404).json({ message: 'Site não encontrado.' });
         }
 
-        let price;
-        let title;
-        if (purchaseType === 'sale') {
-            price = site.price_sale;
-            title = `Compra do Site: ${site.name}`;
-        } else {
-            price = site.price_rent;
-            title = `Aluguel (30 dias) do Site: ${site.name}`;
-        }
+        // Usa o preço enviado pelo frontend (que já foi validado lá)
+        const transactionPrice = parseFloat(price);
+        const title = purchaseType === 'sale' ? `Compra do Site: ${siteName}` : `Aluguel (30 dias) do Site: ${siteName}`;
 
-        if (price <= 0) {
+        if (transactionPrice <= 0) {
              return res.status(400).json({ message: 'Preço inválido para o tipo de compra selecionado.' });
         }
 
@@ -45,25 +41,44 @@ const createPreference = async (req, res) => {
             user_id: userId,
             site_id: siteId,
             purchase_type: purchaseType,
-            transaction_amount: price,
+            transaction_amount: transactionPrice,
             status: 'pending',
         });
+        
+        // 2. Cria uma instância do Módulo Preference
+        const preferenceModule = new Preference(mercadopagoClient);
 
-        // 2. Cria a preferência de pagamento no Mercado Pago
+        // 3. Monta os dados de preferência
         const preferenceData = {
-            body: { // Adicionado 'body' para o novo SDK
+            body: {
                 items: [
                     {
                         title: title,
-                        unit_price: price,
+                        unit_price: transactionPrice,
                         quantity: 1,
                         currency_id: 'BRL',
                     }
                 ],
+                // Adiciona dados do cliente para checkout transparente/avançado
+                payer: { 
+                    name: customer.fullName,
+                    email: customer.email,
+                    phone: { area_code: "", number: "" }, // Telefones são opcionais
+                    address: {
+                        zip_code: customer.address.zipCode,
+                        street_name: customer.address.streetName,
+                        street_number: customer.address.streetNumber,
+                    }
+                },
                 back_urls: {
-                    success: `${process.env.FRONTEND_URL}/compra-concluida`,
+                    success: `${process.env.FRONTEND_URL}/compra-concluida?orderId=${order.id}`, // Passa o ID do pedido
                     failure: `${process.env.FRONTEND_URL}/pagamento-falhou`,
                     pending: `${process.env.FRONTEND_URL}/pagamento-pendente`,
+                },
+                payment_methods: {
+                    // Controla o método de pagamento conforme o frontend (se for cartão, não precisa excluir nada)
+                    excluded_payment_types: paymentMethod === 'pix' ? [{ id: "credit_card" }, { id: "debit_card" }, { id: "ticket" }] : 
+                                            paymentMethod === 'boleto' ? [{ id: "credit_card" }, { id: "debit_card" }, { id: "atm" }] : []
                 },
                 notification_url: `${process.env.BACKEND_URL}/api/payment/webhook?source=mercadopago`,
                 auto_return: 'approved',
@@ -71,15 +86,15 @@ const createPreference = async (req, res) => {
             }
         };
 
-        // Usa mercadopagoClient.preferences.create
-        const mpResponse = await mercadopagoClient.preferences.create(preferenceData);
+        // 4. Cria a preferência usando a instância do módulo
+        const mpResponse = await preferenceModule.create(preferenceData);
         
-        // 3. Atualiza o pedido com o ID da preferência do MP
-        order.mp_preference_id = mpResponse.id; // No novo SDK, o ID está diretamente no objeto
+        // 5. Atualiza o pedido com o ID da preferência do MP
+        order.mp_preference_id = mpResponse.id;
         await order.save();
 
 
-        // Retorna o ID da preferência ou o link para o frontend
+        // Retorna o link de inicialização para o frontend
         res.json({
             preferenceId: mpResponse.id,
             initPoint: mpResponse.init_point
@@ -88,7 +103,9 @@ const createPreference = async (req, res) => {
 
     } catch (error) {
         console.error('Erro ao criar preferência de pagamento:', error);
-        res.status(500).json({ message: 'Erro interno ao criar preferência de pagamento.' });
+        // Exibe o erro específico do MP se estiver disponível
+        const mpErrorMsg = error.cause ? error.cause.map(e => e.description).join(', ') : '';
+        res.status(500).json({ message: `Erro interno ao criar preferência: ${mpErrorMsg}` });
     }
 };
 
@@ -98,16 +115,16 @@ const createPreference = async (req, res) => {
  * @access Public (usado pelo MP)
  */
 const handleWebhook = async (req, res) => {
-    // O Mercado Pago envia o tópico e o ID
     const { topic, id } = req.query; 
 
-    // O Mercado Pago pode enviar diferentes tipos de notificação.
     if (topic === 'payment' && id) {
         try {
+            // Cria uma instância do Módulo Payment
+            const paymentModule = new Payment(mercadopagoClient);
+            
             // 1. Busca os detalhes do pagamento no MP
-            // O novo SDK usa o módulo 'payments' e o método 'get'
-            const payment = await mercadopagoClient.payments.get({ id }); 
-            const paymentData = payment; // O objeto de pagamento está diretamente no retorno
+            const payment = await paymentModule.get({ id }); 
+            const paymentData = payment; 
 
             // 2. Obtém a Referência Externa (ID do nosso Pedido)
             const orderId = paymentData.external_reference;
@@ -121,7 +138,7 @@ const handleWebhook = async (req, res) => {
             // 3. Atualiza o status do pedido
             let newStatus = 'pending';
             if (paymentData.status === 'approved') {
-                newStatus = 'approved';
+                newStatus = 'completed'; // Mudado para 'completed' para compatibilidade com o frontend
                 // Lógica especial para aluguel (adiciona data de expiração)
                 if (order.purchase_type === 'rent') {
                     order.rent_expiry_date = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 dias
@@ -136,7 +153,6 @@ const handleWebhook = async (req, res) => {
 
             console.log(`Webhook: Pedido ID ${orderId} atualizado para status: ${newStatus}`);
             
-            // É crucial retornar 200 OK para o Mercado Pago
             res.status(200).send('OK'); 
 
         } catch (error) {
@@ -144,7 +160,6 @@ const handleWebhook = async (req, res) => {
             res.status(500).send('Erro interno do servidor');
         }
     } else {
-        // Ignorar notificações que não sejam de pagamento
         res.status(200).send('OK'); 
     }
 };
