@@ -1,7 +1,9 @@
 // siteController.js
 const express = require('express');
 const router = express.Router();
-const models = require('./models');
+// const models = require('./models'); // LINHA ORIGINAL REMOVIDA
+// CORREÇÃO: Acessa o objeto de modelos inicializados via global
+const models = global.solematesModels; 
 // CORREÇÃO 1: Importar 'protect' também
 const { protect, admin } = require('./authMiddleware');
 const { cloudinary } = require('./cloudinary');
