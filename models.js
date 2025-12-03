@@ -1,5 +1,4 @@
 // sitequevendesites-main/models.js
-
 const { DataTypes } = require('sequelize');
 const bcrypt = require('bcrypt');
 
@@ -18,7 +17,7 @@ function initModels(sequelize) {
         password: { type: DataTypes.STRING, allowNull: false },
         role: { type: DataTypes.ENUM('user', 'admin'), defaultValue: 'user' },
     }, {
-        // CORREÇÃO: Define a nomenclatura snake_case
+        // CORREÇÃO CRÍTICA: Aplica snake_case para timestamps e foreign keys
         underscored: true, 
         hooks: {
             beforeCreate: async (user) => {
@@ -46,7 +45,7 @@ function initModels(sequelize) {
         additional_links: { type: DataTypes.JSON, allowNull: true, defaultValue: [] },
         is_available: { type: DataTypes.BOOLEAN, defaultValue: true }
     }, {
-        // CORREÇÃO: Define a nomenclatura snake_case
+        // CORREÇÃO CRÍTICA: Aplica snake_case
         underscored: true, 
     });
 
@@ -56,7 +55,7 @@ function initModels(sequelize) {
         rating: { type: DataTypes.INTEGER, allowNull: false },
         comment_text: { type: DataTypes.TEXT, allowNull: true },
     }, {
-        // CORREÇÃO: Define a nomenclatura snake_case, corrige o erro created_at
+        // CORREÇÃO CRÍTICA: Aplica snake_case e garante timestamps (created_at/updated_at)
         timestamps: true,
         underscored: true, 
     });
@@ -70,7 +69,7 @@ function initModels(sequelize) {
         purchase_type: { type: DataTypes.ENUM('sale', 'rent'), allowNull: false },
         rent_expiry_date: { type: DataTypes.DATE, allowNull: true },
     }, {
-        // CORREÇÃO: Define a nomenclatura snake_case
+        // CORREÇÃO CRÍTICA: Aplica snake_case
         underscored: true, 
     });
     
@@ -102,7 +101,7 @@ function initModels(sequelize) {
         underscored: true,
     });
 
-    // Associações (Usam user_id e site_id devido ao underscored: true)
+    // Associações
     User.hasMany(Comment, { foreignKey: 'user_id' });
     Comment.belongsTo(User, { foreignKey: 'user_id' });
 
