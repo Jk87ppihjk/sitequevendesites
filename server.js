@@ -2,6 +2,7 @@
 const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
+const bcrypt = require('bcrypt'); // 👈 Adicionado para criptografia da senha do admin
 
 // Configuração de Variáveis de Ambiente
 dotenv.config();
@@ -13,7 +14,7 @@ const { initModels } = require('./models');
 // 1. Inicializar os modelos
 const initializedModels = initModels(sequelize);
 
-// 2. Definir os modelos no escopo global
+// 2. Definir os modelos no escopo global (Corrige o erro de importação de modelos)
 global.solematesModels = initializedModels; 
 
 // Controladores de Rotas
@@ -31,12 +32,29 @@ const initializeApp = async () => {
     try {
         await connectDB();
         
-        // --- CORREÇÃO AQUI ---
-        // { force: true } APAGA as tabelas existentes e as recria do zero.
-        // Isso resolve o erro de Foreign Key eliminando dados órfãos/inválidos.
+        // ATENÇÃO: Use { force: true } APENAS NESTA ETAPA DE CORREÇÃO.
+        // Depois de logar, mude para { alter: true } ou remova o force/alter para evitar perda de dados.
         console.log('🔄 Sincronizando banco de dados (FORCE mode)...');
         await sequelize.sync({ force: true }); 
         console.log('✅ Banco de dados recriado e sincronizado com sucesso.');
+
+        // --- LÓGICA DE CRIAÇÃO DO ADMIN (SEEDER) ---
+        const models = global.solematesModels;
+        const adminEmail = 'admin@solemate.com';
+        
+        const adminExists = await models.User.findOne({ where: { email: adminEmail } });
+
+        if (!adminExists) {
+            const hashedPassword = await bcrypt.hash('admin123', 10); // Senha: admin123
+            await models.User.create({
+                full_name: 'Administrador Principal',
+                email: adminEmail,
+                password: hashedPassword,
+                role: 'admin' // 👈 Define a role como admin
+            });
+            console.log('👑 Usuário Admin criado automaticamente: admin@solemate.com / admin123');
+        }
+        // ---------------------------------------------
 
         // --- Inicialização do Servidor ---
         const PORT = process.env.PORT || 3000;
@@ -46,8 +64,7 @@ const initializeApp = async () => {
 
     } catch (error) {
         console.error('❌ Falha na inicialização do servidor:', error);
-        // Não encerra o processo bruscamente para permitir ver os logs no Render
-        // process.exit(1); 
+        // Em um ambiente de produção, é melhor deixar o processo rodar para não causar loop de restart
     }
 }
 
