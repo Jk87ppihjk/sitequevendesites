@@ -23,9 +23,10 @@ const generateToken = (id) => {
  * @access Public
  */
 const registerUser = async (req, res) => {
-    const { fullName, email, password } = req.body;
+    // CORRIGIDO: Agora espera 'full_name' conforme enviado pelo frontend.
+    const { full_name, email, password } = req.body;
 
-    if (!fullName || !email || !password) {
+    if (!full_name || !email || !password) {
         return res.status(400).json({ message: 'Por favor, preencha todos os campos.' });
     }
 
@@ -37,7 +38,7 @@ const registerUser = async (req, res) => {
         }
 
         const user = await models.User.create({
-            full_name: fullName,
+            full_name: full_name, // Usa o campo corrigido
             email,
             password,
             role: 'user', // Garante que novos usuários sejam 'user'
