@@ -68,13 +68,11 @@ function initModels(sequelize) {
         },
         price_sale: {
             type: DataTypes.DECIMAL(10, 2),
-            allowNull: true, 
-            defaultValue: 0.00
+            allowNull: true, defaultValue: 0.00
         },
         price_rent: {
             type: DataTypes.DECIMAL(10, 2),
-            allowNull: true, 
-            defaultValue: 0.00
+            allowNull: true, defaultValue: 0.00
         },
         main_image_url: {
             type: DataTypes.STRING,
@@ -83,25 +81,11 @@ function initModels(sequelize) {
         site_link: {
             type: DataTypes.STRING,
             allowNull: false,
-            validate: {
-                isUrl: true,
-            }
         },
         additional_links: {
             type: DataTypes.JSON, 
             allowNull: true,
             defaultValue: [],
-            get() {
-                const rawValue = this.getDataValue('additional_links');
-                try {
-                    return typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue;
-                } catch (e) {
-                    return rawValue;
-                }
-            },
-            set(value) {
-                this.setDataValue('additional_links', JSON.stringify(value));
-            }
         },
         is_available: {
             type: DataTypes.BOOLEAN,
@@ -119,10 +103,6 @@ function initModels(sequelize) {
         rating: {
             type: DataTypes.INTEGER,
             allowNull: false,
-            validate: {
-                min: 1,
-                max: 5,
-            }
         },
         comment_text: {
             type: DataTypes.TEXT,
@@ -130,36 +110,24 @@ function initModels(sequelize) {
         },
     });
 
-    // --- 4. Order Model (para rastrear compras e aluguéis) ---
+    // --- 4. Order Model ---
     Order = sequelize.define('Order', {
         id: {
             type: DataTypes.INTEGER,
             autoIncrement: true,
             primaryKey: true,
         },
-        mp_preference_id: {
-            type: DataTypes.STRING,
-            allowNull: true,
-        },
+        mp_preference_id: { type: DataTypes.STRING, allowNull: true },
         status: {
-            type: DataTypes.ENUM('pending', 'approved', 'rejected', 'rented', 'expired'),
+            type: DataTypes.ENUM('pending', 'approved', 'rejected', 'rented', 'expired', 'completed'),
             defaultValue: 'pending',
         },
-        transaction_amount: {
-            type: DataTypes.DECIMAL(10, 2),
-            allowNull: false,
-        },
-        purchase_type: {
-            type: DataTypes.ENUM('sale', 'rent'),
-            allowNull: false,
-        },
-        rent_expiry_date: {
-            type: DataTypes.DATE,
-            allowNull: true,
-        },
+        transaction_amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+        purchase_type: { type: DataTypes.ENUM('sale', 'rent'), allowNull: false },
+        rent_expiry_date: { type: DataTypes.DATE, allowNull: true },
     });
     
-    // --- 5. SystemConfig Model ---
+    // --- 5. SystemConfig Model (CORRIGIDO) ---
     SystemConfig = sequelize.define('SystemConfig', {
         id: {
             type: DataTypes.INTEGER,
@@ -169,27 +137,28 @@ function initModels(sequelize) {
         site_id: { 
             type: DataTypes.INTEGER,
             allowNull: false,
-            unique: true, 
+            // REMOVI "unique: true" aqui, pois o mesmo site pode ter configs de usuarios diferentes
         },
-        // Variáveis de Ambiente
-        mp_access_token: { type: DataTypes.STRING, allowNull: true }, // Set to true since client might not have it initially
+        user_id: { // ADICIONADO: Vínculo com o Usuário
+            type: DataTypes.INTEGER,
+            allowNull: false,
+        },
+        
+        // Dados de Configuração
+        mp_access_token: { type: DataTypes.STRING, allowNull: true }, 
         frontend_url: { type: DataTypes.STRING, allowNull: true },
 
-        // NOVOS CAMPOS DB
+        // CAMPOS QUE ESTAVAM FALTANDO OU NULOS
         db_host: { type: DataTypes.STRING, allowNull: true },
         db_name: { type: DataTypes.STRING, allowNull: true },
         db_user: { type: DataTypes.STRING, allowNull: true },
         db_password: { type: DataTypes.STRING, allowNull: true },
         
-        // NOVOS CAMPOS CLOUDINARY
         cloudinary_cloud_name: { type: DataTypes.STRING, allowNull: true },
         cloudinary_api_key: { type: DataTypes.STRING, allowNull: true },
         cloudinary_api_secret: { type: DataTypes.STRING, allowNull: true },
 
-        // OUTROS
         brevo_api_key: { type: DataTypes.STRING, allowNull: true },
-
-        // Estilo Visual
         visual_style: { type: DataTypes.TEXT, allowNull: true }, 
 
     }, {
@@ -212,23 +181,14 @@ function initModels(sequelize) {
     Site.hasMany(Order, { foreignKey: 'site_id' });
     Order.belongsTo(Site, { foreignKey: 'site_id' });
 
-    Site.hasOne(SystemConfig, { foreignKey: 'site_id' });
-    SystemConfig.belongsTo(Site, { foreignKey: 'site_id' }); 
+    // Configuração pertence a um Site E a um Usuário
+    Site.hasMany(SystemConfig, { foreignKey: 'site_id' });
+    SystemConfig.belongsTo(Site, { foreignKey: 'site_id' });
+    
+    User.hasMany(SystemConfig, { foreignKey: 'user_id' });
+    SystemConfig.belongsTo(User, { foreignKey: 'user_id' });
 
-    return {
-        User,
-        Site,
-        Comment,
-        Order,
-        SystemConfig 
-    };
+    return { User, Site, Comment, Order, SystemConfig };
 }
 
-module.exports = {
-    initModels,
-    get User() { return User; },
-    get Site() { return Site; },
-    get Comment() { return Comment; },
-    get Order() { return Order; },
-    get SystemConfig() { return SystemConfig; }, 
-};
+module.exports = { initModels, get User() { return User; }, get Site() { return Site; }, get Comment() { return Comment; }, get Order() { return Order; }, get SystemConfig() { return SystemConfig; } };
