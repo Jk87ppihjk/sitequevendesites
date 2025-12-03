@@ -17,7 +17,7 @@ const initializedModels = initModels(sequelize);
 // 2. Definir os modelos no escopo global (Corrige o erro de importação de modelos)
 global.solematesModels = initializedModels; 
 
-// Controladores de Rotas (IMPORTAÇÃO ÚNICA)
+// Controladores de Rotas (IMPORTAÇÃO ÚNICA AQUI)
 const authRoutes = require('./authController');
 const siteRoutes = require('./siteController');
 const orderRoutes = require('./orderController');
@@ -32,9 +32,7 @@ const initializeApp = async () => {
     try {
         await connectDB();
         
-        // CORREÇÃO CRÍTICA: Removendo o { force: true } que apagava o banco
-        // a cada inicialização. Isso deve resolver o problema de 401.
-        // Usamos { alter: true } para aplicar migrações de schema sem perder dados.
+        // CORREÇÃO CRÍTICA: Não usar { force: true } para evitar a perda do admin
         console.log('🔄 Sincronizando banco de dados (ALTER mode)...');
         await sequelize.sync({ alter: true }); 
         console.log('✅ Banco de dados sincronizado com sucesso.');
@@ -82,7 +80,7 @@ app.use(cors({
     credentials: true,
 }));
 
-// --- Rotas da API (USO ÚNICO) ---
+// --- Rotas da API (USO ÚNICO DOS IMPORTS) ---
 app.use('/api/auth', authRoutes);
 app.use('/api/sites', siteRoutes);
 app.use('/api/orders', orderRoutes);
