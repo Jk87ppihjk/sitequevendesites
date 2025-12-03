@@ -127,7 +127,7 @@ function initModels(sequelize) {
         rent_expiry_date: { type: DataTypes.DATE, allowNull: true },
     });
     
-    // --- 5. SystemConfig Model (CORRIGIDO) ---
+    // --- 5. SystemConfig Model (ATUALIZADO) ---
     SystemConfig = sequelize.define('SystemConfig', {
         id: {
             type: DataTypes.INTEGER,
@@ -137,9 +137,8 @@ function initModels(sequelize) {
         site_id: { 
             type: DataTypes.INTEGER,
             allowNull: false,
-            // REMOVI "unique: true" aqui, pois o mesmo site pode ter configs de usuarios diferentes
         },
-        user_id: { // ADICIONADO: Vínculo com o Usuário
+        user_id: { 
             type: DataTypes.INTEGER,
             allowNull: false,
         },
@@ -148,18 +147,23 @@ function initModels(sequelize) {
         mp_access_token: { type: DataTypes.STRING, allowNull: true }, 
         frontend_url: { type: DataTypes.STRING, allowNull: true },
 
-        // CAMPOS QUE ESTAVAM FALTANDO OU NULOS
+        // Banco de Dados do Cliente
         db_host: { type: DataTypes.STRING, allowNull: true },
         db_name: { type: DataTypes.STRING, allowNull: true },
         db_user: { type: DataTypes.STRING, allowNull: true },
         db_password: { type: DataTypes.STRING, allowNull: true },
         
+        // Cloudinary do Cliente
         cloudinary_cloud_name: { type: DataTypes.STRING, allowNull: true },
         cloudinary_api_key: { type: DataTypes.STRING, allowNull: true },
         cloudinary_api_secret: { type: DataTypes.STRING, allowNull: true },
 
+        // Outros
         brevo_api_key: { type: DataTypes.STRING, allowNull: true },
         visual_style: { type: DataTypes.TEXT, allowNull: true }, 
+
+        // NOVO: Link do ZIP do Frontend (Upload do Admin)
+        frontend_zip_url: { type: DataTypes.STRING, allowNull: true },
 
     }, {
         tableName: 'system_configs',
