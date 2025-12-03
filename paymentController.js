@@ -1,50 +1,30 @@
+// ==========================
+// BACKEND (Node.js / Express)
+// ==========================
+
 const express = require('express');
 const router = express.Router();
 const { mercadopagoClient } = require('./mp'); 
 const { protect } = require('./authMiddleware');
-// Importa as classes necessárias do Mercado Pago SDK V2
 const { Preference, Payment } = require('mercadopago'); 
-
-// CORREÇÃO: Acessa o objeto de modelos inicializados via global
 const models = global.solematesModels;
 
-/**
- * @route POST /api/payment/create-preference
- * @desc Cria uma preferência de pagamento no MP para um Site
- * @access Private
- */
+// -----------------------------
+// CREATE PREFERENCE (CORRIGIDO)
+// -----------------------------
 const createPreference = async (req, res) => {
-    // Adiciona destructuring para o corpo do checkout detalhado. O campo 'price' é crucial.
     const { siteId, purchaseType, price, siteName, customer } = req.body;
     const userId = req.user.id;
 
-    console.log(`[CreatePreference] Iniciando criação para UserID: ${userId}, SiteID: ${siteId}, Tipo: ${purchaseType}`);
-
-    if (!siteId || !['sale', 'rent'].includes(purchaseType)) {
-        console.error('[CreatePreference] Erro: Dados inválidos recebidos.');
-        return res.status(400).json({ message: 'Site ID e tipo de compra (sale/rent) são obrigatórios.' });
-    }
-
     const transactionPrice = parseFloat(price);
-
-    // ⭐️ CORREÇÃO PRINCIPAL: Validação explícita de NaN e valor positivo.
-    if (isNaN(transactionPrice) || transactionPrice <= 0) {
-        console.error(`[CreatePreference] Erro: Preço inválido ou ausente (${price}). TransacionPrice: ${transactionPrice}`);
-        // Retorna a mensagem de erro que o Mercado Pago geraria, mas antes de bater na API.
-        return res.status(400).json({ message: 'A propriedade de preço (price) é obrigatória e deve ser um valor positivo válido.' });
+    if (isNaN(transactionPrice) || transactionPrice < 1) {
+        return res.status(400).json({ message: "O valor mínimo permitido pelo Mercado Pago é R$ 1,00." });
     }
 
     try {
         const site = await models.Site.findByPk(siteId);
+        if (!site) return res.status(404).json({ message: 'Site não encontrado.' });
 
-        if (!site) {
-            console.error('[CreatePreference] Erro: Site não encontrado no DB.');
-            return res.status(404).json({ message: 'Site não encontrado.' });
-        }
-
-        const title = purchaseType === 'sale' ? `Compra do Site: ${siteName}` : `Aluguel (30 dias) do Site: ${siteName}`;
-
-        // 1. Cria o registro do Pedido como 'pending'
         const order = await models.Order.create({
             user_id: userId,
             site_id: siteId,
@@ -52,168 +32,177 @@ const createPreference = async (req, res) => {
             transaction_amount: transactionPrice,
             status: 'pending',
         });
-        
-        console.log(`[CreatePreference] Pedido local criado. ID: ${order.id}`);
 
-        // 2. Cria uma instância do Módulo Preference
         const preferenceModule = new Preference(mercadopagoClient);
-
-        // Verifica a URL de notificação
         const notificationUrl = `${process.env.BACKEND_URL}/api/payment/webhook?source=mercadopago`;
-        console.log(`[CreatePreference] URL de Notificação definida como: ${notificationUrl}`);
 
-        // 3. Monta os dados de preferência
         const preferenceData = {
             body: {
                 items: [
                     {
-                        title: title,
-                        unit_price: transactionPrice, // PREÇO CORRETO ENVIADO PARA O MP
+                        title: purchaseType === 'sale' ? `Compra do Site: ${siteName}` : `Aluguel (30 dias) do Site: ${siteName}`,
+                        unit_price: transactionPrice,
                         quantity: 1,
                         currency_id: 'BRL',
                     }
                 ],
-                payer: { 
+
+                payer: {
                     name: customer.fullName,
                     email: customer.email,
-                    // Deixando phone e address com dados do cliente para preenchimento automático no Brick
-                    phone: { area_code: "11", number: "999999999" }, // Valores mock para evitar erro de validação do MP se estiverem vazios
+                    entity_type: "individual", // Fix obrigatório
+                    identification: {
+                        type: "CPF",
+                        number: customer.cpf ? customer.cpf : "00000000000"
+                    },
+                    phone: {
+                        area_code: "11",
+                        number: "999999999"
+                    },
                     address: {
                         zip_code: customer.address.zipCode,
                         street_name: customer.address.streetName,
                         street_number: customer.address.streetNumber,
                     }
                 },
+
                 back_urls: {
                     success: `${process.env.FRONTEND_URL}/compra-concluida?orderId=${order.id}`,
                     failure: `${process.env.FRONTEND_URL}/pagamento-falhou`,
                     pending: `${process.env.FRONTEND_URL}/pagamento-pendente`,
                 },
-                // Retorna 'approved' para o Mercado Pago, para que ele redirecione o usuário de volta 
-                // após o pagamento (em vez do webhook) - Útil para cartões.
-                auto_return: 'approved', 
-                external_reference: order.id.toString(), // VITAL: Isso liga o MP ao nosso DB
+
+                auto_return: 'approved',
+                external_reference: order.id.toString(),
                 notification_url: notificationUrl,
             }
         };
-        
-        // 4. Cria a preferência
-        const mpResponse = await preferenceModule.create(preferenceData);
-        
-        console.log(`[CreatePreference] Preferência criada no MP. ID: ${mpResponse.id}`);
 
-        // 5. Atualiza o pedido com o ID da preferência
+        const mpResponse = await preferenceModule.create(preferenceData);
         order.mp_preference_id = mpResponse.id;
         await order.save();
 
-        // 6. Retorna o ID da preferência para o frontend (para o Brick)
-        res.json({
-            preferenceId: mpResponse.id,
-            // Mantendo initPoint, apesar de não ser usado pelo Brick, pode ser útil
-            initPoint: mpResponse.init_point 
-        });
+        res.json({ preferenceId: mpResponse.id, initPoint: mpResponse.init_point });
 
     } catch (error) {
-        console.error('[CreatePreference] ERRO FATAL:', error);
-        // Tenta extrair a mensagem de erro mais detalhada do Mercado Pago
-        const mpErrorMsg = error.cause && Array.isArray(error.cause) 
-            ? error.cause.map(e => e.description || e.code).join(', ') 
-            : 'Detalhes do erro indisponíveis.';
-
-        res.status(500).json({ 
-            message: `Erro interno ao criar preferência. ${mpErrorMsg}`,
-            // Se for erro de validação (como 'Amount is required'), o MP coloca no cause.
-            details: mpErrorMsg
-        });
+        console.error(error);
+        res.status(500).json({ message: 'Erro interno ao criar preferência.' });
     }
 };
 
-/**
- * @route POST /api/payment/webhook
- * @desc Recebe notificações do Mercado Pago sobre o status do pagamento
- * @access Public (usado pelo MP)
- */
+// -----------------------------
+// WEBHOOK (CORRIGIDO)
+// -----------------------------
 const handleWebhook = async (req, res) => {
-    const { topic, id } = req.query; 
-
-    // O MP pode enviar o ID no query, no body ou em data.id
+    const { topic, id } = req.query;
     const paymentId = id || req.body?.data?.id || req.body?.id;
-    
-    // Filtra apenas tópicos de pagamento e garante que tenhamos um ID
+
     if ((topic === 'payment' || req.body?.type === 'payment') && paymentId) {
         try {
-            console.log(`[Webhook] Buscando detalhes do pagamento ID: ${paymentId} no Mercado Pago...`);
-
             const paymentModule = new Payment(mercadopagoClient);
-            
-            // 1. Busca os detalhes do pagamento no MP
-            const payment = await paymentModule.get({ id: paymentId }); 
-            
-            console.log(`[Webhook] Resposta MP -> Status: ${payment.status}, External Ref (Order ID): ${payment.external_reference}`);
-
-            // 2. Obtém a Referência Externa (ID do nosso Pedido)
+            const payment = await paymentModule.get({ id: paymentId });
             const orderId = payment.external_reference;
-            
-            if (!orderId) {
-                console.error('[Webhook] ERRO: Pagamento sem external_reference. Não é possível vincular ao pedido.');
-                return res.status(200).send('OK'); 
-            }
+            if (!orderId) return res.status(200).send('OK');
 
             const order = await models.Order.findByPk(orderId);
+            if (!order) return res.status(404).json({ message: 'Pedido não encontrado.' });
 
-            if (!order) {
-                console.error(`[Webhook] ERRO: Pedido local ID ${orderId} não encontrado no banco de dados.`);
-                return res.status(404).json({ message: 'Pedido não encontrado.' });
-            }
+            let newStatus = order.status;
 
-            console.log(`[Webhook] Pedido encontrado. Status atual no DB: ${order.status}`);
-
-            // 3. Atualiza o status do pedido
-            let newStatus = order.status; 
-
-            if (payment.status === 'approved' && order.status !== 'completed' && order.status !== 'rented') {
-                newStatus = 'completed'; 
-                // Lógica especial para aluguel
+            if (payment.status === 'approved') {
+                newStatus = order.purchase_type === 'rent' ? 'rented' : 'completed';
                 if (order.purchase_type === 'rent') {
-                    order.rent_expiry_date = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); 
-                    newStatus = 'rented';
+                    order.rent_expiry_date = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
                 }
-                console.log(`[Webhook] Pagamento APROVADO. Novo status será: ${newStatus}`);
-            } else if (payment.status === 'rejected' || payment.status === 'cancelled') {
-                newStatus = 'rejected';
-                console.log(`[Webhook] Pagamento REJEITADO/CANCELADO.`);
-            } else if (payment.status === 'pending' || payment.status === 'in_process') {
-                newStatus = 'pending';
-                console.log(`[Webhook] Pagamento ainda pendente/em processo.`);
-            }
+            } else if (payment.status === 'rejected') newStatus = 'rejected';
+            else if (payment.status === 'pending') newStatus = 'pending';
 
-            // Só salva se houver mudança de status ou necessidade de salvar a data de aluguel
-            if (order.status !== newStatus || (newStatus === 'rented' && !order.rent_expiry_date)) {
-                order.status = newStatus;
-                await order.save();
-                console.log(`[Webhook] SUCESSO: Pedido ID ${orderId} atualizado no banco para: ${newStatus}`);
-            } else {
-                console.log(`[Webhook] Nenhuma alteração de status necessária.`);
-            }
-            
-            res.status(200).send('OK'); 
+            order.status = newStatus;
+            await order.save();
+            return res.status(200).send('OK');
 
         } catch (error) {
-            console.error('[Webhook] ERRO CRÍTICO ao processar:', error);
-            res.status(500).send('Erro interno do servidor');
+            console.error(error);
+            return res.status(500).send('Erro interno.');
         }
-    } else {
-        console.log('[Webhook] Recebido tópico desconhecido ou sem ID. Ignorando.');
-        res.status(200).send('OK'); 
     }
+
+    return res.status(200).send('OK');
 };
 
-
-// --- Definição das Rotas de Pagamento ---
 router.post('/create-preference', protect, createPreference);
 router.post('/webhook', handleWebhook);
-router.get('/webhook', (req, res) => {
-    res.send('Webhook endpoint está ativo. Mercado Pago usa POST.');
+router.get('/webhook', (req, res) => res.send('Webhook ativo. Use POST.'));
+module.exports = router;
+
+
+// ==========================
+// FRONTEND (Checkout + Brick)
+// ==========================
+
+/* HTML/JS corrigido:
+
+<div id="paymentBrick_container"></div>
+
+<script src="https://sdk.mercadopago.com/js/v2"></script>
+<script>
+
+const mp = new MercadoPago("TEST-9b3e3f41-e7a3-4868-9545-61e87d256dd1", {
+    locale: 'pt-BR'
 });
 
-module.exports = router;
+async function startCheckout() {
+    const response = await fetch(`/api/payment/create-preference`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+            siteId: 1,
+            purchaseType: 'rent',
+            price: 1.00, // 🔥 Não pode ser menos de 1 real
+            siteName: 'Meu Site',
+            customer: {
+                fullName: "Cliente Teste",
+                cpf: "12345678900",
+                email: "cliente@email.com",
+                address: {
+                    zipCode: "01001000",
+                    streetName: "Av Paulista",
+                    streetNumber: "1000"
+                }
+            }
+        })
+    });
+
+    const data = await response.json();
+
+    if (!data.preferenceId) {
+        console.error("Falha ao criar preferência", data);
+        return;
+    }
+
+    const bricks = mp.bricks();
+
+    bricks.create('payment', 'paymentBrick_container', {
+        initialization: {
+            preferenceId: data.preferenceId,
+            amount: 1.00
+        },
+        customization: {
+            paymentMethods: {
+                ticket: 'all',
+                creditCard: 'all'
+            }
+        },
+        callbacks: {
+            onReady: () => console.log("Brick carregado"),
+            onError: error => console.error("Brick error", error)
+        }
+    });
+}
+
+startCheckout();
+</script>
+*/
