@@ -5,7 +5,7 @@ const models = require('./models');
 const { protect } = require('./authMiddleware');
 
 /**
- * @route GET /api/orders/my
+ * @route GET /api/orders/me
  * @desc Obtém o histórico de sites comprados/alugados pelo usuário logado
  * @access Private
  */
@@ -15,7 +15,7 @@ const getMyOrders = async (req, res) => {
             where: { user_id: req.user.id },
             include: [{
                 model: models.Site,
-                attributes: ['name', 'site_link', 'main_image_url'],
+                attributes: ['name', 'site_link', 'main_image_url', 'id'], // Adicionado 'id' para uso no frontend
             }],
             order: [['created_at', 'DESC']],
         });
@@ -47,7 +47,7 @@ const createSiteReview = async (req, res) => {
             where: {
                 user_id: userId,
                 site_id: siteId,
-                status: ['approved', 'rented'], // Se o status for de compra concluída
+                status: ['approved', 'rented', 'completed'], // Incluindo 'completed'
             },
         });
 
@@ -84,7 +84,7 @@ const createSiteReview = async (req, res) => {
 
 
 // --- Definição das Rotas de Pedidos e Comentários ---
-router.get('/my', protect, getMyOrders);
+router.get('/me', protect, getMyOrders); // CORRIGIDO: Rota alterada de '/my' para '/me'
 router.post('/:siteId/review', protect, createSiteReview);
 
 module.exports = router;
