@@ -1,6 +1,9 @@
 // authMiddleware.js
 const jwt = require('jsonwebtoken');
-const models = require('./models');
+// const models = require('./models'); // LINHA ORIGINAL REMOVIDA
+
+// CORREÇÃO: Acessa o objeto de modelos inicializados via global
+const models = global.solematesModels;
 
 /**
  * Middleware para proteger rotas. Verifica a validade do JWT e anexa o usuário à requisição.
