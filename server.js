@@ -2,7 +2,7 @@
 const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
-const bcrypt = require('bcrypt'); // 👈 Adicionado para criptografia da senha do admin
+const bcrypt = require('bcrypt');
 
 // Configuração de Variáveis de Ambiente
 dotenv.config();
@@ -17,7 +17,7 @@ const initializedModels = initModels(sequelize);
 // 2. Definir os modelos no escopo global (Corrige o erro de importação de modelos)
 global.solematesModels = initializedModels; 
 
-// Controladores de Rotas
+// Controladores de Rotas (IMPORTAÇÃO ÚNICA)
 const authRoutes = require('./authController');
 const siteRoutes = require('./siteController');
 const orderRoutes = require('./orderController');
@@ -33,8 +33,8 @@ const initializeApp = async () => {
         await connectDB();
         
         // CORREÇÃO CRÍTICA: Removendo o { force: true } que apagava o banco
-        // a cada inicialização. Usamos { alter: true } para aplicar migrações
-        // de schema sem perder dados.
+        // a cada inicialização. Isso deve resolver o problema de 401.
+        // Usamos { alter: true } para aplicar migrações de schema sem perder dados.
         console.log('🔄 Sincronizando banco de dados (ALTER mode)...');
         await sequelize.sync({ alter: true }); 
         console.log('✅ Banco de dados sincronizado com sucesso.');
@@ -43,7 +43,6 @@ const initializeApp = async () => {
         const models = global.solematesModels;
         const adminEmail = 'admin@solemate.com';
         
-        // Esta linha garante que o admin só será criado se não existir
         const adminExists = await models.User.findOne({ where: { email: adminEmail } });
 
         if (!adminExists) {
@@ -52,7 +51,7 @@ const initializeApp = async () => {
                 full_name: 'Administrador Principal',
                 email: adminEmail,
                 password: hashedPassword,
-                role: 'admin' // 👈 Define a role como admin
+                role: 'admin'
             });
             console.log('👑 Usuário Admin criado automaticamente: admin@solemate.com / admin123');
         }
@@ -83,19 +82,12 @@ app.use(cors({
     credentials: true,
 }));
 
-// --- Rotas da API ---
-const authRoutes = require('./authController');
-const siteRoutes = require('./siteController');
-const orderRoutes = require('./orderController');
-const paymentRoutes = require('./paymentController');
-const customizationRoutes = require('./customizationController');
-const fileRoutes = require('./fileController');
-
+// --- Rotas da API (USO ÚNICO) ---
 app.use('/api/auth', authRoutes);
 app.use('/api/sites', siteRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/payment', paymentRoutes);
-app.use('/api/customization', customizationController);
+app.use('/api/customization', customizationRoutes);
 app.use('/api/files', fileRoutes); 
 
 app.get('/', (req, res) => {
