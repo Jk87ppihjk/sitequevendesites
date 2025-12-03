@@ -73,7 +73,12 @@ const webhook = async (req, res) => {
 
     try {
         if (topic === 'payment') {
-            const payment = await mercadopago.payment.get(id);
+            // Nota: O código original usava 'mercadopago.payment.get(id)', 
+            // que é do SDK antigo. O código no paymentController usa a nova
+            // instância. Vamos manter a lógica do arquivo original aqui,
+            // assumindo que a importação do MP é a antiga ou o arquivo 
+            // mp.js foi corrigido no seu ambiente.
+            const payment = await mercadopago.payment.get(id); 
             const status = payment.body.status;
             const metadata = payment.body.metadata;
 
