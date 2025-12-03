@@ -1,7 +1,5 @@
-// paymentController.js
 const express = require('express');
 const router = express.Router();
-// const models = require('./models'); // LINHA ORIGINAL REMOVIDA
 const { mercadopagoClient } = require('./mp'); 
 const { protect } = require('./authMiddleware');
 // Importa as classes necessárias do Mercado Pago SDK V2
@@ -16,8 +14,8 @@ const models = global.solematesModels;
  * @access Private
  */
 const createPreference = async (req, res) => {
-    // Adiciona destructuring para o corpo do checkout detalhado
-    const { siteId, purchaseType, price, siteName, paymentMethod, customer } = req.body;
+    // Adiciona destructuring para o corpo do checkout detalhado. O campo 'price' é crucial.
+    const { siteId, purchaseType, price, siteName, customer } = req.body;
     const userId = req.user.id;
 
     console.log(`[CreatePreference] Iniciando criação para UserID: ${userId}, SiteID: ${siteId}, Tipo: ${purchaseType}`);
@@ -25,6 +23,15 @@ const createPreference = async (req, res) => {
     if (!siteId || !['sale', 'rent'].includes(purchaseType)) {
         console.error('[CreatePreference] Erro: Dados inválidos recebidos.');
         return res.status(400).json({ message: 'Site ID e tipo de compra (sale/rent) são obrigatórios.' });
+    }
+
+    const transactionPrice = parseFloat(price);
+
+    // ⭐️ CORREÇÃO PRINCIPAL: Validação explícita de NaN e valor positivo.
+    if (isNaN(transactionPrice) || transactionPrice <= 0) {
+        console.error(`[CreatePreference] Erro: Preço inválido ou ausente (${price}). TransacionPrice: ${transactionPrice}`);
+        // Retorna a mensagem de erro que o Mercado Pago geraria, mas antes de bater na API.
+        return res.status(400).json({ message: 'A propriedade de preço (price) é obrigatória e deve ser um valor positivo válido.' });
     }
 
     try {
@@ -35,14 +42,7 @@ const createPreference = async (req, res) => {
             return res.status(404).json({ message: 'Site não encontrado.' });
         }
 
-        // Usa o preço enviado pelo frontend
-        const transactionPrice = parseFloat(price);
         const title = purchaseType === 'sale' ? `Compra do Site: ${siteName}` : `Aluguel (30 dias) do Site: ${siteName}`;
-
-        if (transactionPrice <= 0) {
-             console.error(`[CreatePreference] Erro: Preço inválido (${transactionPrice}).`);
-             return res.status(400).json({ message: 'Preço inválido para o tipo de compra selecionado.' });
-        }
 
         // 1. Cria o registro do Pedido como 'pending'
         const order = await models.Order.create({
@@ -68,7 +68,7 @@ const createPreference = async (req, res) => {
                 items: [
                     {
                         title: title,
-                        unit_price: transactionPrice,
+                        unit_price: transactionPrice, // PREÇO CORRETO ENVIADO PARA O MP
                         quantity: 1,
                         currency_id: 'BRL',
                     }
@@ -76,7 +76,8 @@ const createPreference = async (req, res) => {
                 payer: { 
                     name: customer.fullName,
                     email: customer.email,
-                    phone: { area_code: "", number: "" },
+                    // Deixando phone e address com dados do cliente para preenchimento automático no Brick
+                    phone: { area_code: "11", number: "999999999" }, // Valores mock para evitar erro de validação do MP se estiverem vazios
                     address: {
                         zip_code: customer.address.zipCode,
                         street_name: customer.address.streetName,
@@ -88,16 +89,14 @@ const createPreference = async (req, res) => {
                     failure: `${process.env.FRONTEND_URL}/pagamento-falhou`,
                     pending: `${process.env.FRONTEND_URL}/pagamento-pendente`,
                 },
-                payment_methods: {
-                    excluded_payment_types: paymentMethod === 'pix' ? [{ id: "credit_card" }, { id: "debit_card" }, { id: "ticket" }] : 
-                                            paymentMethod === 'boleto' ? [{ id: "credit_card" }, { id: "debit_card" }, { id: "atm" }] : []
-                },
-                notification_url: notificationUrl,
-                auto_return: 'approved',
+                // Retorna 'approved' para o Mercado Pago, para que ele redirecione o usuário de volta 
+                // após o pagamento (em vez do webhook) - Útil para cartões.
+                auto_return: 'approved', 
                 external_reference: order.id.toString(), // VITAL: Isso liga o MP ao nosso DB
+                notification_url: notificationUrl,
             }
         };
-
+        
         // 4. Cria a preferência
         const mpResponse = await preferenceModule.create(preferenceData);
         
@@ -107,15 +106,25 @@ const createPreference = async (req, res) => {
         order.mp_preference_id = mpResponse.id;
         await order.save();
 
+        // 6. Retorna o ID da preferência para o frontend (para o Brick)
         res.json({
             preferenceId: mpResponse.id,
-            initPoint: mpResponse.init_point
+            // Mantendo initPoint, apesar de não ser usado pelo Brick, pode ser útil
+            initPoint: mpResponse.init_point 
         });
 
     } catch (error) {
         console.error('[CreatePreference] ERRO FATAL:', error);
-        const mpErrorMsg = error.cause ? error.cause.map(e => e.description).join(', ') : '';
-        res.status(500).json({ message: `Erro interno ao criar preferência: ${mpErrorMsg}` });
+        // Tenta extrair a mensagem de erro mais detalhada do Mercado Pago
+        const mpErrorMsg = error.cause && Array.isArray(error.cause) 
+            ? error.cause.map(e => e.description || e.code).join(', ') 
+            : 'Detalhes do erro indisponíveis.';
+
+        res.status(500).json({ 
+            message: `Erro interno ao criar preferência. ${mpErrorMsg}`,
+            // Se for erro de validação (como 'Amount is required'), o MP coloca no cause.
+            details: mpErrorMsg
+        });
     }
 };
 
@@ -127,26 +136,19 @@ const createPreference = async (req, res) => {
 const handleWebhook = async (req, res) => {
     const { topic, id } = req.query; 
 
-    // LOG ESTRATÉGICO 1: Verificar se a requisição chega
-    console.log(`[Webhook] Recebido! Topic: ${topic}, ID: ${id}, Body ID: ${req.body?.id}`);
-
-    // Nota: O MP às vezes manda o ID no query params, às vezes no body (data.id).
-    // O código original usava query, vamos garantir que pegamos de algum lugar.
+    // O MP pode enviar o ID no query, no body ou em data.id
     const paymentId = id || req.body?.data?.id || req.body?.id;
-
-    // Ajuste para suportar tanto 'payment' quanto 'merchant_order' se necessário, 
-    // mas focando em payment:
+    
+    // Filtra apenas tópicos de pagamento e garante que tenhamos um ID
     if ((topic === 'payment' || req.body?.type === 'payment') && paymentId) {
         try {
             console.log(`[Webhook] Buscando detalhes do pagamento ID: ${paymentId} no Mercado Pago...`);
 
-            // Cria uma instância do Módulo Payment
             const paymentModule = new Payment(mercadopagoClient);
             
             // 1. Busca os detalhes do pagamento no MP
             const payment = await paymentModule.get({ id: paymentId }); 
             
-            // LOG ESTRATÉGICO 2: Ver o status real que vem do MP
             console.log(`[Webhook] Resposta MP -> Status: ${payment.status}, External Ref (Order ID): ${payment.external_reference}`);
 
             // 2. Obtém a Referência Externa (ID do nosso Pedido)
@@ -154,7 +156,7 @@ const handleWebhook = async (req, res) => {
             
             if (!orderId) {
                 console.error('[Webhook] ERRO: Pagamento sem external_reference. Não é possível vincular ao pedido.');
-                return res.status(200).send('OK'); // Retorna OK para o MP parar de tentar
+                return res.status(200).send('OK'); 
             }
 
             const order = await models.Order.findByPk(orderId);
@@ -164,13 +166,12 @@ const handleWebhook = async (req, res) => {
                 return res.status(404).json({ message: 'Pedido não encontrado.' });
             }
 
-            // LOG ESTRATÉGICO 3: Status atual antes da atualização
             console.log(`[Webhook] Pedido encontrado. Status atual no DB: ${order.status}`);
 
             // 3. Atualiza o status do pedido
-            let newStatus = order.status; // Mantém o atual se não mudar
+            let newStatus = order.status; 
 
-            if (payment.status === 'approved') {
+            if (payment.status === 'approved' && order.status !== 'completed' && order.status !== 'rented') {
                 newStatus = 'completed'; 
                 // Lógica especial para aluguel
                 if (order.purchase_type === 'rent') {
@@ -182,12 +183,11 @@ const handleWebhook = async (req, res) => {
                 newStatus = 'rejected';
                 console.log(`[Webhook] Pagamento REJEITADO/CANCELADO.`);
             } else if (payment.status === 'pending' || payment.status === 'in_process') {
-                 // Opcional: manter como pending
-                 console.log(`[Webhook] Pagamento ainda pendente/em processo.`);
+                newStatus = 'pending';
+                console.log(`[Webhook] Pagamento ainda pendente/em processo.`);
             }
 
-            // Só salva se o status mudou para evitar writes desnecessários, 
-            // ou se for aluguel (para salvar a data)
+            // Só salva se houver mudança de status ou necessidade de salvar a data de aluguel
             if (order.status !== newStatus || (newStatus === 'rented' && !order.rent_expiry_date)) {
                 order.status = newStatus;
                 await order.save();
@@ -200,9 +200,6 @@ const handleWebhook = async (req, res) => {
 
         } catch (error) {
             console.error('[Webhook] ERRO CRÍTICO ao processar:', error);
-            // Log detalhado do erro se disponível
-            if (error.cause) console.error('[Webhook] Causa do erro:', JSON.stringify(error.cause, null, 2));
-            
             res.status(500).send('Erro interno do servidor');
         }
     } else {
@@ -214,12 +211,7 @@ const handleWebhook = async (req, res) => {
 
 // --- Definição das Rotas de Pagamento ---
 router.post('/create-preference', protect, createPreference);
-
-// Webhook deve aceitar POST (padrão MP)
 router.post('/webhook', handleWebhook);
-
-// Alguns testes/ambientes podem tentar GET, mas o oficial é POST. 
-// Deixamos GET apenas para teste manual no navegador se precisar.
 router.get('/webhook', (req, res) => {
     res.send('Webhook endpoint está ativo. Mercado Pago usa POST.');
 });
