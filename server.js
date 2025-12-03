@@ -7,15 +7,15 @@ const cors = require('cors');
 dotenv.config();
 
 // Módulos Internos
-// CORREÇÃO 1: Importar a instância 'sequelize' e a função 'connectDB'
+// CORREÇÃO: Importar a instância 'sequelize' e a função 'connectDB'
 const { connectDB, sequelize } = require('./database'); 
-// CORREÇÃO 2: Importar apenas a função 'initModels'
+// CORREÇÃO: Importar apenas a função 'initModels'
 const { initModels } = require('./models'); 
 
-// 3. Inicializar os modelos ANTES de carregar os controladores de rota
+// 1. Inicializar os modelos ANTES de carregar os controladores de rota
 const initializedModels = initModels(sequelize);
 
-// 4. ATENÇÃO: Definir os modelos no escopo global para que os controllers possam acessá-los
+// 2. ATENÇÃO: Definir os modelos no escopo global para que os controllers possam acessá-los
 global.solematesModels = initializedModels; 
 
 
@@ -29,8 +29,32 @@ const fileRoutes = require('./fileController');
 
 const app = express();
 
-// --- Conexão com o Banco de Dados ---
-connectDB(); // Apenas chama a conexão. A inicialização dos modelos já ocorreu acima.
+// --- Conexão e Sincronização com o Banco de Dados ---
+const initializeApp = async () => {
+    try {
+        await connectDB();
+        
+        // CORREÇÃO CRÍTICA: Sincronizar modelos para criar tabelas no banco de dados
+        // Use { force: true } para recriar as tabelas (cuidado: apaga todos os dados!)
+        // Use { alter: true } para tentar adicionar colunas, mantendo os dados existentes
+        await sequelize.sync({ alter: true }); // Escolha o método de sincronização ideal para você
+        console.log('✅ Banco de dados sincronizado (tabelas criadas/atualizadas).');
+
+        // --- Inicialização do Servidor ---
+        const PORT = process.env.PORT || 3000;
+        app.listen(PORT, () => {
+            console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
+        });
+
+    } catch (error) {
+        console.error('❌ Falha na inicialização do servidor:', error);
+        process.exit(1);
+    }
+}
+
+// Inicia a aplicação após a sincronização do DB
+initializeApp();
+
 
 // --- Middlewares ---
 app.use(express.json()); 
@@ -60,10 +84,4 @@ app.get('/', (req, res) => {
 // --- Rota 404/Erro ---
 app.use((req, res, next) => {
     res.status(404).json({ message: `Rota não encontrada: ${req.originalUrl}` });
-});
-
-// --- Inicialização do Servidor ---
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
 });
