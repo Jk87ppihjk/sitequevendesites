@@ -1,4 +1,5 @@
-// models.js
+// sitequevendesites-main/models.js
+
 const { DataTypes } = require('sequelize');
 const bcrypt = require('bcrypt');
 
@@ -17,7 +18,7 @@ function initModels(sequelize) {
         password: { type: DataTypes.STRING, allowNull: false },
         role: { type: DataTypes.ENUM('user', 'admin'), defaultValue: 'user' },
     }, {
-        // CORREÇÃO: Usar snake_case para created_at/updated_at e chaves estrangeiras
+        // CORREÇÃO: Define a nomenclatura snake_case
         underscored: true, 
         hooks: {
             beforeCreate: async (user) => {
@@ -45,7 +46,7 @@ function initModels(sequelize) {
         additional_links: { type: DataTypes.JSON, allowNull: true, defaultValue: [] },
         is_available: { type: DataTypes.BOOLEAN, defaultValue: true }
     }, {
-        // CORREÇÃO: Usar snake_case
+        // CORREÇÃO: Define a nomenclatura snake_case
         underscored: true, 
     });
 
@@ -55,7 +56,7 @@ function initModels(sequelize) {
         rating: { type: DataTypes.INTEGER, allowNull: false },
         comment_text: { type: DataTypes.TEXT, allowNull: true },
     }, {
-        // CORREÇÃO CRÍTICA: Garante que os campos 'createdAt' sejam 'created_at' no DB
+        // CORREÇÃO: Define a nomenclatura snake_case, corrige o erro created_at
         timestamps: true,
         underscored: true, 
     });
@@ -69,11 +70,11 @@ function initModels(sequelize) {
         purchase_type: { type: DataTypes.ENUM('sale', 'rent'), allowNull: false },
         rent_expiry_date: { type: DataTypes.DATE, allowNull: true },
     }, {
-        // CORREÇÃO: Usar snake_case
+        // CORREÇÃO: Define a nomenclatura snake_case
         underscored: true, 
     });
     
-    // --- 5. SystemConfig ---
+    // --- 5. SystemConfig (MANTIDO) ---
     SystemConfig = sequelize.define('SystemConfig', {
         id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
         site_id: { type: DataTypes.INTEGER, allowNull: false },
@@ -101,8 +102,7 @@ function initModels(sequelize) {
         underscored: true,
     });
 
-    // Associações
-    // Note: As chaves estrangeiras agora serão 'user_id' e 'site_id' graças ao 'underscored: true'
+    // Associações (Usam user_id e site_id devido ao underscored: true)
     User.hasMany(Comment, { foreignKey: 'user_id' });
     Comment.belongsTo(User, { foreignKey: 'user_id' });
 
