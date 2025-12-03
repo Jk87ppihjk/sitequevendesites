@@ -2,116 +2,93 @@
 const express = require('express');
 const router = express.Router();
 const models = require('./models');
-const { protect, admin } = require('./authMiddleware');
+const { protect } = require('./authMiddleware');
 
 /**
- * @route POST /api/customization
- * @desc Salva ou Atualiza a configuração do sistema POR SITE
- * @access Private (Agora permite USUÁRIO COMUM para input de variáveis)
+ * SALVAR CONFIGURAÇÃO (Cliente)
  */
 const saveConfig = async (req, res) => {
+    // 1. Recebe os dados do frontend (camelCase)
     const { 
-        siteId, // Novo campo obrigatório
-        mpAccessToken, frontendUrl, dbName, 
-        dbUser, cloudinaryName, brevoApiKey, 
+        siteId, 
+        mpAccessToken, frontendUrl, 
+        dbHost, dbName, dbUser, dbPassword, 
+        cloudinaryName, cloudinaryApiKey, cloudinaryApiSecret, 
+        brevoApiKey, 
         visualStyle 
     } = req.body;
 
-    if (!siteId || !mpAccessToken || !frontendUrl || !visualStyle) {
-        return res.status(400).json({ message: 'Campos obrigatórios de configuração faltando (incluindo siteId).' });
-    }
+    if (!siteId) return res.status(400).json({ message: 'Site ID obrigatório.' });
 
     try {
-        // Validação adicional: Garantir que o usuário logado é o dono do site
-        const order = await models.Order.findOne({
-            where: { user_id: req.user.id, site_id: siteId, status: ['completed', 'rented'] }
-        });
-        
-        if (!order && req.user.role !== 'admin') {
-            return res.status(403).json({ message: 'Você não tem permissão para configurar este site.' });
-        }
+        const userId = req.user.id; // ID do usuário logado
 
+        // 2. Mapeia para o banco de dados (snake_case)
+        const configData = {
+            site_id: siteId,
+            user_id: userId, // IMPORTANTE: Salva quem é o dono!
+            mp_access_token: mpAccessToken,
+            frontend_url: frontendUrl,
+            db_host: dbHost,
+            db_name: dbName,
+            db_user: dbUser,
+            db_password: dbPassword,
+            cloudinary_cloud_name: cloudinaryName,
+            cloudinary_api_key: cloudinaryApiKey,
+            cloudinary_api_secret: cloudinaryApiSecret,
+            brevo_api_key: brevoApiKey,
+            visual_style: visualStyle,
+        };
 
-        // Usa site_id para encontrar ou criar a configuração
+        // 3. Procura se JÁ EXISTE uma config deste SITE para este USUÁRIO
         const [config, created] = await models.SystemConfig.findOrCreate({
-            where: { site_id: siteId },
-            defaults: {
-                site_id: siteId,
-                mp_access_token: mpAccessToken,
-                frontend_url: frontendUrl,
-                db_name: dbName,
-                db_user: dbUser,
-                cloudinary_cloud_name: cloudinaryName,
-                brevo_api_key: brevoApiKey,
-                visual_style: visualStyle,
-            }
+            where: { site_id: siteId, user_id: userId },
+            defaults: configData
         });
 
         if (!created) {
-            // Se já existia, atualiza
-            await config.update({
-                mp_access_token: mpAccessToken,
-                frontend_url: frontendUrl,
-                db_name: dbName,
-                db_user: dbUser,
-                cloudinary_cloud_name: cloudinaryName,
-                brevo_api_key: brevoApiKey,
-                visual_style: visualStyle,
-            });
+            await config.update(configData);
         }
 
-        res.json({ message: `Configuração salva com sucesso para o Site ID ${siteId}!`, config: config });
+        res.json({ message: 'Configuração salva com sucesso!', config });
 
     } catch (error) {
-        console.error('Erro ao salvar configuração:', error);
-        res.status(500).json({ message: 'Erro interno ao salvar as configurações.' });
+        console.error('Erro ao salvar config:', error);
+        res.status(500).json({ message: 'Erro interno.' });
     }
 };
 
 /**
- * @route GET /api/customization
- * @desc Obtém a configuração atual do sistema POR SITE
- * @access Private (Agora permite USUÁRIO COMUM, mas Admin pode ver tudo)
+ * BUSCAR CONFIGURAÇÃO (Admin ou Cliente)
  */
 const getConfig = async (req, res) => {
-    const { siteId } = req.query; // Espera siteId nos query params
-
-    if (!siteId) {
-        return res.status(400).json({ message: 'Site ID é obrigatório.' });
-    }
+    const { siteId, userId } = req.query; // Admin pode passar userId na query
     
+    // Se for admin e passou userId, usa o userId passado. Se for cliente, usa o próprio ID.
+    let targetUserId = req.user.id;
+    if (req.user.role === 'admin' && userId) {
+        targetUserId = userId;
+    }
+
+    if (!siteId) return res.status(400).json({ message: 'Site ID obrigatório.' });
+
     try {
-        // Validação de acesso: Apenas o dono do site ou Admin pode visualizar
-        const order = await models.Order.findOne({
-            where: { site_id: siteId, user_id: req.user.id, status: ['completed', 'rented'] }
-        });
-        
-        if (!order && req.user.role !== 'admin') {
-             // Se não for o dono e não for admin
-            return res.status(403).json({ message: 'Você não tem permissão para ver esta configuração.' });
-        }
-
-
-        // Busca a configuração pelo site_id
         const config = await models.SystemConfig.findOne({
-            where: { site_id: siteId },
-            attributes: { exclude: ['id', 'created_at', 'updated_at'] } 
+            where: { site_id: siteId, user_id: targetUserId }
         });
 
         if (!config) {
-            return res.status(404).json({ message: `Nenhuma configuração encontrada para o Site ID ${siteId}.` });
+            return res.status(404).json({ message: 'Configuração não encontrada.' });
         }
 
         res.json(config);
 
     } catch (error) {
-        console.error('Erro ao buscar configuração:', error);
-        res.status(500).json({ message: 'Erro interno ao buscar as configurações.' });
+        console.error('Erro busca config:', error);
+        res.status(500).json({ message: 'Erro interno.' });
     }
 };
 
-// --- Definição das Rotas de Personalização ---
-// Rota GET/POST agora só requer PROTECT (autenticação), removendo 'admin'
 router.post('/', protect, saveConfig); 
 router.get('/', protect, getConfig); 
 
