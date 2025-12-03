@@ -75,7 +75,9 @@ const getSites = async (req, res) => {
     try {
         const sites = await models.Site.findAll({
             where: { is_available: true },
-            order: [['created_at', 'DESC']]
+            // CORREÇÃO CRÍTICA: O atributo do modelo Sequelize é 'createdAt' (camelCase).
+            // Com 'underscored: true' no models.js, o Sequelize fará o mapeamento correto para 'created_at' no SQL.
+            order: [['createdAt', 'DESC']]
         });
         res.json(sites);
     } catch (error) {
@@ -94,6 +96,7 @@ const getSiteDetails = async (req, res) => {
         const site = await models.Site.findByPk(req.params.id, {
             include: [{
                 model: models.Comment,
+                // Os atributos devem usar snake_case se o modelo Comment tiver 'underscored: true'
                 attributes: ['id', 'rating', 'comment_text', 'created_at'],
                 include: [{
                     model: models.User,
@@ -126,7 +129,7 @@ router.get('/', getSites);
 router.get('/:id', getSiteDetails);
 
 // CORREÇÃO 2: Adicionar 'protect' antes de 'admin'
-// Sem 'protect', o req.user não existe e o 'admin' sempre retorna 403.
+// O middleware 'protect' injeta req.user, que o 'admin' usa para checar a role.
 router.post('/', protect, admin, upload.single('image'), createSite);
 
 module.exports = router;
