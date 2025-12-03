@@ -7,12 +7,19 @@ const models = require('./models');
 const { protect } = require('./authMiddleware');
 
 /**
- * Gera um token JWT para o usuário.
- * @param {number} id ID do usuário
+ * Gera um token JWT para o usuário, incluindo ID, email e nome completo (fullName).
+ * @param {object} user Objeto do usuário com id, full_name e email.
  * @returns {string} Token JWT
  */
-const generateToken = (id) => {
-    return jwt.sign({ id }, process.env.JWT_SECRET, {
+const generateToken = (user) => {
+    // CORREÇÃO: Incluir o email e o nome completo no payload do token.
+    // O frontend espera 'email' e 'fullName' (ou full_name). Usaremos 'fullName'
+    // para corresponder ao que o frontend tenta ler.
+    return jwt.sign({ 
+        id: user.id,
+        email: user.email,
+        fullName: user.full_name, // O campo no DB é full_name
+    }, process.env.JWT_SECRET, {
         expiresIn: '30d',
     });
 };
@@ -50,7 +57,8 @@ const registerUser = async (req, res) => {
                 fullName: user.full_name,
                 email: user.email,
                 role: user.role,
-                token: generateToken(user.id),
+                // CORREÇÃO: Passa o objeto 'user' para generateToken
+                token: generateToken(user),
             });
         } else {
             res.status(400).json({ message: 'Dados de usuário inválidos.' });
@@ -79,7 +87,8 @@ const loginUser = async (req, res) => {
                 fullName: user.full_name,
                 email: user.email,
                 role: user.role,
-                token: generateToken(user.id),
+                // CORREÇÃO: Passa o objeto 'user' para generateToken
+                token: generateToken(user),
             });
         } else {
             res.status(401).json({ message: 'Email ou senha inválidos.' });
