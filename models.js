@@ -1,4 +1,4 @@
-// sitequevendesites-main/models.js
+// models.js
 const { DataTypes } = require('sequelize');
 const bcrypt = require('bcrypt');
 
@@ -17,8 +17,7 @@ function initModels(sequelize) {
         password: { type: DataTypes.STRING, allowNull: false },
         role: { type: DataTypes.ENUM('user', 'admin'), defaultValue: 'user' },
     }, {
-        // CORREÇÃO CRÍTICA: Aplica snake_case para timestamps e foreign keys
-        underscored: true, 
+        underscored: true, // Mantido (assume-se que Users usa created_at/updated_at)
         hooks: {
             beforeCreate: async (user) => {
                 const salt = await bcrypt.genSalt(10);
@@ -34,6 +33,7 @@ function initModels(sequelize) {
     });
 
     // --- 2. Site ---
+    // CORREÇÃO AQUI: Ajustado para bater com a tabela que tem 'createdAt' (camelCase)
     Site = sequelize.define('Site', {
         id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
         name: { type: DataTypes.STRING, allowNull: false },
@@ -45,8 +45,9 @@ function initModels(sequelize) {
         additional_links: { type: DataTypes.JSON, allowNull: true, defaultValue: [] },
         is_available: { type: DataTypes.BOOLEAN, defaultValue: true }
     }, {
-        // CORREÇÃO CRÍTICA: Aplica snake_case
-        underscored: true, 
+        // IMPORTANTE: Definido como false para buscar 'createdAt' e 'updatedAt' no banco
+        underscored: false, 
+        timestamps: true
     });
 
     // --- 3. Comment ---
@@ -55,7 +56,6 @@ function initModels(sequelize) {
         rating: { type: DataTypes.INTEGER, allowNull: false },
         comment_text: { type: DataTypes.TEXT, allowNull: true },
     }, {
-        // CORREÇÃO CRÍTICA: Aplica snake_case e garante timestamps (created_at/updated_at)
         timestamps: true,
         underscored: true, 
     });
@@ -69,11 +69,10 @@ function initModels(sequelize) {
         purchase_type: { type: DataTypes.ENUM('sale', 'rent'), allowNull: false },
         rent_expiry_date: { type: DataTypes.DATE, allowNull: true },
     }, {
-        // CORREÇÃO CRÍTICA: Aplica snake_case
         underscored: true, 
     });
     
-    // --- 5. SystemConfig (MANTIDO) ---
+    // --- 5. SystemConfig ---
     SystemConfig = sequelize.define('SystemConfig', {
         id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
         site_id: { type: DataTypes.INTEGER, allowNull: false },
