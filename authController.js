@@ -3,8 +3,11 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
-const models = require('./models');
+// const models = require('./models'); // LINHA ORIGINAL REMOVIDA
 const { protect } = require('./authMiddleware');
+
+// CORREÇÃO: Acessa o objeto de modelos inicializados via global
+const models = global.solematesModels;
 
 /**
  * Gera um token JWT para o usuário, incluindo ID, email e nome completo (fullName).
@@ -78,6 +81,7 @@ const loginUser = async (req, res) => {
     const { email, password } = req.body;
 
     try {
+        // CORREÇÃO: models.User agora está definido, permitindo o findOne.
         const user = await models.User.findOne({ where: { email } });
 
         // Verifica a senha se o usuário existir
