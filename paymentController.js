@@ -1,237 +1,194 @@
-// paymentRoutes.js
 // ==========================
-// BACKEND (Node.js / Express) - CREATE PREFERENCE + WEBHOOK
+// PAYMENT CONTROLLER FINAL
 // ==========================
 
 const express = require('express');
 const router = express.Router();
-const { mercadopagoClient } = require('./mp'); // sua instância / client configurado
+const { mercadopagoClient } = require('./mp');
 const { protect } = require('./authMiddleware');
-const { Preference, Payment } = require('mercadopago'); 
-const models = global.solematesModels; // ajuste se necessário
+const { Preference, Payment } = require('mercadopago');
+const models = global.solematesModels;
 
-// Helper: extrai preferenceId de forma robusta (suporta variações da SDK)
-function extractPreferenceId(mpResponse) {
-    if (!mpResponse) return null;
-    if (mpResponse.body && mpResponse.body.id) return mpResponse.body.id;
-    if (mpResponse.response && mpResponse.response.id) return mpResponse.response.id;
-    if (mpResponse.id) return mpResponse.id;
-    return null;
-}
 
-function extractInitPoint(mpResponse) {
-    if (!mpResponse) return null;
-    if (mpResponse.body && mpResponse.body.init_point) return mpResponse.body.init_point;
-    if (mpResponse.response && mpResponse.response.init_point) return mpResponse.response.init_point;
-    if (mpResponse.init_point) return mpResponse.init_point;
-    return null;
-}
-
-// -----------------------------
-// CREATE PREFERENCE
-// -----------------------------
+// =======================================
+// 🟩 CREATE PREFERENCE — 100% FINAL
+// =======================================
 const createPreference = async (req, res) => {
+    console.log("\n========== [createPreference] ==========");
+
+    const { siteId, purchaseType, price, siteName, customer } = req.body;
+    const userId = req.user.id;
+
+    console.log("[createPreference] Recebido do front:", req.body);
+
+    // Garantir que o preço é número REAL
+    const transactionPrice = Number(price);
+
+    if (!transactionPrice || isNaN(transactionPrice) || transactionPrice < 1) {
+        return res.status(400).json({
+            message: "O Mercado Pago exige valor mínimo de R$ 1,00."
+        });
+    }
+
+    // CPF ou CNPJ
+    const rawDoc = customer.cpfCnpj.replace(/\D/g, '');
+    const isCnpj = rawDoc.length > 11;
+
     try {
-        const { siteId, purchaseType, price, siteName, customer } = req.body;
-        const userId = req.user && req.user.id;
-
-        console.log('[createPreference] recebido do front:', { siteId, purchaseType, price, siteName });
-
-        if (!userId) return res.status(401).json({ message: 'Usuário não autenticado.' });
-        if (!siteId || !purchaseType) return res.status(400).json({ message: 'siteId e purchaseType são obrigatórios.' });
-
-        // Conversão e validação do preço
-        const transactionPrice = Number(price);
-        if (isNaN(transactionPrice)) {
-            return res.status(400).json({ message: 'Preço inválido.' });
-        }
-        if (transactionPrice < 1) {
-            return res.status(400).json({ message: 'O valor mínimo permitido pelo Mercado Pago é R$ 1,00.' });
-        }
-
-        // Validação do objeto customer mínimo
-        if (!customer || !customer.fullName || !customer.email) {
-            return res.status(400).json({ message: 'Dados do cliente incompletos (fullName / email são obrigatórios).' });
-        }
-
-        // Normaliza CPF / CNPJ
-        const rawDocSource = (customer.cpfCnpj || customer.cpf || '').toString();
-        const rawDoc = rawDocSource.replace(/\D/g, '');
-        const isCnpj = rawDoc.length > 11;
-
-        // Busca site no DB
+        // Carregar site
         const site = await models.Site.findByPk(siteId);
         if (!site) return res.status(404).json({ message: 'Site não encontrado.' });
 
-        // Cria pedido local como pending
+        // Criar pedido interno
         const order = await models.Order.create({
             user_id: userId,
             site_id: siteId,
             purchase_type: purchaseType,
-            transaction_amount: Number(transactionPrice.toFixed(2)),
+            transaction_amount: transactionPrice,
             status: 'pending',
         });
 
-        // Monta preferenceData conforme Mercado Pago SDK v2
-        const preferenceModule = new Preference(mercadopagoClient);
-        const notificationUrl = `${process.env.BACKEND_URL}/api/payment/webhook?source=mercadopago`;
+        console.log(`[createPreference] Pedido criado: OrderID = ${order.id}`);
 
-        // Garante que address fields exist to evitar validação do MP que rejeita
-        const safeAddress = {
-            zip_code: (customer.address && customer.address.zipCode) || '00000000',
-            street_name: (customer.address && customer.address.streetName) || 'N/A',
-            street_number: (customer.address && customer.address.streetNumber) || '0'
-        };
+        // Criar preferência Mercado Pago
+        const preferenceModule = new Preference(mercadopagoClient);
 
         const preferenceData = {
             body: {
                 items: [
                     {
                         title: purchaseType === 'sale'
-                            ? `Compra do Site: ${siteName || site.name}`
-                            : `Aluguel (30 dias) do Site: ${siteName || site.name}`,
-                        unit_price: Number(transactionPrice.toFixed(2)),
+                            ? `Compra do Site: ${siteName}`
+                            : `Aluguel (30 dias) do Site: ${siteName}`,
+                        unit_price: Number(transactionPrice),
                         quantity: 1,
-                        currency_id: 'BRL'
+                        currency_id: "BRL",
                     }
                 ],
-
-                // Inclui payer com entity_type e identificação correta
                 payer: {
                     name: customer.fullName,
                     email: customer.email,
                     entity_type: isCnpj ? "association" : "individual",
                     identification: {
                         type: isCnpj ? "CNPJ" : "CPF",
-                        number: rawDoc || (isCnpj ? "00000000000000" : "00000000000")
+                        number: rawDoc
                     },
-                    phone: {
-                        area_code: (customer.phone && customer.phone.area_code) || "11",
-                        number: (customer.phone && customer.phone.number) || "999999999"
-                    },
-                    address: safeAddress
+                    address: {
+                        zip_code: customer.address.zipCode,
+                        street_name: customer.address.streetName,
+                        street_number: customer.address.streetNumber,
+                    }
                 },
-
-                // Evita que a preferência venha sem meios de pagamento habilitados
-                payment_methods: {
-                    excluded_payment_types: [], // não exclui nada por padrão
-                    installments: 12
-                },
-
                 back_urls: {
                     success: `${process.env.FRONTEND_URL}/compra-concluida?orderId=${order.id}`,
                     failure: `${process.env.FRONTEND_URL}/pagamento-falhou`,
                     pending: `${process.env.FRONTEND_URL}/pagamento-pendente`,
                 },
-
-                auto_return: 'approved',
+                auto_return: "approved",
                 external_reference: order.id.toString(),
-                notification_url: notificationUrl,
+                notification_url: `${process.env.BACKEND_URL}/api/payment/webhook?source=mercadopago`,
             }
         };
 
-        console.log('[createPreference] preferenceData (preview):', {
-            items: preferenceData.body.items,
-            payer: { name: preferenceData.body.payer.name, email: preferenceData.body.payer.email, entity_type: preferenceData.body.payer.entity_type },
-            external_reference: preferenceData.body.external_reference
-        });
+        console.log("[createPreference] preferenceData criado corretamente.");
 
-        // Cria preferência no MP
+        // Criar preferência no Mercado Pago
         const mpResponse = await preferenceModule.create(preferenceData);
-        console.log('[createPreference] mpResponse raw:', typeof mpResponse === 'object' ? Object.keys(mpResponse) : mpResponse);
 
-        const preferenceId = extractPreferenceId(mpResponse);
-        const initPoint = extractInitPoint(mpResponse);
+        console.log("[createPreference] Resposta MP recebida.");
+        console.log("[createPreference] mpResponse.id:", mpResponse.id);
+        console.log("[createPreference] mpResponse.init_point:", mpResponse.init_point);
 
-        if (!preferenceId) {
-            console.error('[createPreference] preferenceId não retornado pelo Mercado Pago:', mpResponse);
-            return res.status(502).json({ message: 'Falha ao criar preferência no Mercado Pago.' });
+        if (!mpResponse.id) {
+            return res.status(500).json({
+                message: "Erro ao criar preferência no Mercado Pago.",
+                raw: mpResponse
+            });
         }
 
-        // Salva ID da preferência no pedido local (usa fallback robusto)
-        order.mp_preference_id = preferenceId;
+        // Salvar no pedido
+        order.mp_preference_id = mpResponse.id;
         await order.save();
 
-        // Retorna preferenceId corretamente para o frontend (o Brick espera isso)
+        console.log("[createPreference] Preferência salva no pedido ✔️");
+
+        // Retornar para o Frontend
         return res.json({
-            preferenceId: preferenceId,
-            initPoint: initPoint || null
+            preferenceId: mpResponse.id,      // ✔️ Preferência real
+            amount: Number(transactionPrice), // ✔️ Obrigatório para o Brick
+            initPoint: mpResponse.init_point
         });
 
     } catch (error) {
-        console.error('[createPreference] ERRO:', error && (error.message || error));
-        // Se MP trouxe detalhes, retorne para facilitar debug
-        const mpCause = error && (error.cause || error.message || null);
-        return res.status(500).json({ message: 'Erro interno ao criar preferência.', details: mpCause });
+        console.error("\n❌ ERRO CREATE PREFERENCE:", error);
+        res.status(500).json({ message: "Erro interno ao criar preferência.", error });
     }
 };
 
-// -----------------------------
-// WEBHOOK
-// -----------------------------
+
+// =======================================
+// 🟦 WEBHOOK — 100% FINAL
+// =======================================
 const handleWebhook = async (req, res) => {
+    console.log("\n========== [WEBHOOK RECEBIDO] ==========");
+
     const { topic, id } = req.query;
     const paymentId = id || req.body?.data?.id || req.body?.id;
 
-    // Aceita várias formas de notificação
-    if (!paymentId) {
-        console.log('[webhook] recebido sem paymentId - ignorando');
-        return res.status(200).send('OK');
-    }
+    console.log("[Webhook] Topic:", topic, "PaymentId:", paymentId);
 
-    try {
-        const paymentModule = new Payment(mercadopagoClient);
-        const payment = await paymentModule.get({ id: paymentId });
+    if ((topic === 'payment' || req.body?.type === 'payment') && paymentId) {
+        try {
+            const paymentModule = new Payment(mercadopagoClient);
 
-        // Em alguns retornos, a estrutura está em body
-        const paymentData = payment.body || payment.response || payment;
+            // Puxa detalhes
+            const payment = await paymentModule.get({ id: paymentId });
 
-        console.log('[webhook] paymentData:', { id: paymentData.id, status: paymentData.status, external_reference: paymentData.external_reference });
+            console.log("[Webhook] Status do pagamento:", payment.status);
+            console.log("[Webhook] external_reference:", payment.external_reference);
 
-        const orderId = paymentData.external_reference;
-        if (!orderId) {
-            console.error('[webhook] payment sem external_reference - ignorando');
-            return res.status(200).send('OK');
-        }
+            const orderId = payment.external_reference;
+            if (!orderId) return res.status(200).send("OK (Sem orderId)");
 
-        const order = await models.Order.findByPk(orderId);
-        if (!order) {
-            console.error(`[webhook] Pedido local ${orderId} não encontrado.`);
-            return res.status(404).json({ message: 'Pedido não encontrado.' });
-        }
+            const order = await models.Order.findByPk(orderId);
+            if (!order) return res.status(404).json({ message: "Pedido não encontrado." });
 
-        let newStatus = order.status;
+            // Atualiza status
+            if (payment.status === "approved") {
+                order.status = order.purchase_type === "rent" ? "rented" : "completed";
 
-        if (paymentData.status === 'approved') {
-            newStatus = order.purchase_type === 'rent' ? 'rented' : 'completed';
-            if (order.purchase_type === 'rent') {
-                order.rent_expiry_date = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+                if (order.purchase_type === "rent") {
+                    order.rent_expiry_date = new Date(Date.now() + 30 * 86400000);
+                }
+
+            } else if (payment.status === "pending") {
+                order.status = "pending";
+
+            } else if (payment.status === "rejected") {
+                order.status = "rejected";
             }
-        } else if (paymentData.status === 'pending' || paymentData.status === 'in_process') {
-            newStatus = 'pending';
-        } else if (paymentData.status === 'rejected' || paymentData.status === 'cancelled') {
-            newStatus = 'rejected';
-        }
 
-        if (order.status !== newStatus) {
-            order.status = newStatus;
             await order.save();
-            console.log(`[webhook] Pedido ${orderId} atualizado para ${newStatus}`);
-        } else {
-            console.log(`[webhook] Pedido ${orderId} já estava em ${newStatus}`);
+
+            console.log(`[Webhook] Pedido ${order.id} atualizado para: ${order.status}`);
+
+            return res.status(200).send("OK");
+
+        } catch (error) {
+            console.error("❌ ERRO WEBHOOK:", error);
+            return res.status(500).send("Erro interno");
         }
-
-        return res.status(200).send('OK');
-
-    } catch (error) {
-        console.error('[webhook] ERRO:', error && (error.message || error));
-        return res.status(500).send('Erro interno.');
     }
+
+    return res.status(200).send("OK");
 };
 
-// Rotas
+
+// ==========================
+// ROTAS
+// ==========================
 router.post('/create-preference', protect, createPreference);
 router.post('/webhook', handleWebhook);
-router.get('/webhook', (req, res) => res.send('Webhook ativo. Use POST.'));
+router.get('/webhook', (req, res) => res.send("Webhook ativo. Use POST."));
 
 module.exports = router;
