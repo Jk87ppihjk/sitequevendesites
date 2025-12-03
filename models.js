@@ -5,7 +5,8 @@ const bcrypt = require('bcrypt');
 let User;
 let Site;
 let Comment;
-let Order; // Adicionado modelo de pedido/compra
+let Order;
+let SystemConfig; 
 
 /**
  * Função para definir todos os modelos e suas associações.
@@ -41,7 +42,6 @@ function initModels(sequelize) {
         },
     }, {
         hooks: {
-            // Hash da senha antes de salvar no banco de dados
             beforeCreate: async (user) => {
                 const salt = await bcrypt.genSalt(10);
                 user.password = await bcrypt.hash(user.password, salt);
@@ -72,12 +72,12 @@ function initModels(sequelize) {
         },
         price_sale: {
             type: DataTypes.DECIMAL(10, 2),
-            allowNull: true, // Pode ser apenas aluguel
+            allowNull: true,
             defaultValue: 0.00
         },
         price_rent: {
             type: DataTypes.DECIMAL(10, 2),
-            allowNull: true, // Pode ser apenas venda
+            allowNull: true,
             defaultValue: 0.00
         },
         main_image_url: {
@@ -91,13 +91,11 @@ function initModels(sequelize) {
                 isUrl: true,
             }
         },
-        // Links adicionais serão armazenados como JSON string
         additional_links: {
-            type: DataTypes.JSON, // Armazenado como TEXT/JSON no MySQL
+            type: DataTypes.JSON, 
             allowNull: true,
             defaultValue: [],
             get() {
-                // Se for string, tenta fazer o parse
                 const rawValue = this.getDataValue('additional_links');
                 try {
                     return typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue;
@@ -106,7 +104,6 @@ function initModels(sequelize) {
                 }
             },
             set(value) {
-                // Garante que seja armazenado como JSON string
                 this.setDataValue('additional_links', JSON.stringify(value));
             }
         },
@@ -135,10 +132,9 @@ function initModels(sequelize) {
             type: DataTypes.TEXT,
             allowNull: true,
         },
-        // userId e siteId serão adicionados pelas associações
     });
 
-    // --- 4. Order Model (para rastrear compras e aluguéis) ---
+    // --- 4. Order Model ---
     Order = sequelize.define('Order', {
         id: {
             type: DataTypes.INTEGER,
@@ -166,42 +162,73 @@ function initModels(sequelize) {
             allowNull: true,
         },
     });
+    
+    // --- 5. SystemConfig Model (NOVO MODELO) ---
+    SystemConfig = sequelize.define('SystemConfig', {
+        id: {
+            type: DataTypes.INTEGER,
+            autoIncrement: true, // Auto-incrementing primary key
+            primaryKey: true,
+        },
+        site_id: { // CHAVE ESTRANGEIRA para o Site
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            unique: true, // Garantindo apenas 1 config por site
+            references: {
+                model: 'Sites',
+                key: 'id',
+            }
+        },
+        // Variáveis de Ambiente
+        mp_access_token: { type: DataTypes.STRING, allowNull: false },
+        frontend_url: { type: DataTypes.STRING, allowNull: false },
+        db_name: { type: DataTypes.STRING, allowNull: false },
+        db_user: { type: DataTypes.STRING, allowNull: false },
+        cloudinary_cloud_name: { type: DataTypes.STRING, allowNull: false },
+        brevo_api_key: { type: DataTypes.STRING, allowNull: true },
+
+        // Estilo Visual
+        visual_style: { type: DataTypes.TEXT, allowNull: true }, 
+
+    }, {
+        tableName: 'system_configs',
+        timestamps: true,
+        underscored: true,
+    });
 
 
     // --- Associações ---
-    // User 1:N Site (O usuário tem muitos Sites/Produtos comprados ou alugados. O Site é o que está sendo vendido.)
-    // A propriedade de "propriedade/aluguel" será rastreada pelo modelo Order
-
-    // User 1:N Comment
     User.hasMany(Comment, { foreignKey: 'user_id' });
     Comment.belongsTo(User, { foreignKey: 'user_id' });
 
-    // Site 1:N Comment
     Site.hasMany(Comment, { foreignKey: 'site_id' });
     Comment.belongsTo(Site, { foreignKey: 'site_id' });
 
-    // User 1:N Order
     User.hasMany(Order, { foreignKey: 'user_id' });
     Order.belongsTo(User, { foreignKey: 'user_id' });
 
-    // Site 1:N Order (Um Site pode estar em muitos pedidos/compras)
     Site.hasMany(Order, { foreignKey: 'site_id' });
     Order.belongsTo(Site, { foreignKey: 'site_id' });
+
+    // NOVO: Site 1:1 SystemConfig
+    Site.hasOne(SystemConfig, { foreignKey: 'site_id' });
+    SystemConfig.belongsTo(Site, { foreignKey: 'site_id' }); 
 
     // Retorna todos os modelos definidos
     return {
         User,
         Site,
         Comment,
-        Order
+        Order,
+        SystemConfig 
     };
 }
 
 module.exports = {
     initModels,
-    // Exporta modelos para que possam ser importados diretamente após a inicialização
     get User() { return User; },
     get Site() { return Site; },
     get Comment() { return Comment; },
     get Order() { return Order; },
+    get SystemConfig() { return SystemConfig; }, 
 };
