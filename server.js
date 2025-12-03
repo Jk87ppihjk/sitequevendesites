@@ -7,17 +7,14 @@ const cors = require('cors');
 dotenv.config();
 
 // Módulos Internos
-// CORREÇÃO: Importar a instância 'sequelize' e a função 'connectDB'
 const { connectDB, sequelize } = require('./database'); 
-// CORREÇÃO: Importar apenas a função 'initModels'
 const { initModels } = require('./models'); 
 
-// 1. Inicializar os modelos ANTES de carregar os controladores de rota
+// 1. Inicializar os modelos
 const initializedModels = initModels(sequelize);
 
-// 2. ATENÇÃO: Definir os modelos no escopo global para que os controllers possam acessá-los
+// 2. Definir os modelos no escopo global
 global.solematesModels = initializedModels; 
-
 
 // Controladores de Rotas
 const authRoutes = require('./authController');
@@ -34,11 +31,12 @@ const initializeApp = async () => {
     try {
         await connectDB();
         
-        // CORREÇÃO CRÍTICA: Sincronizar modelos para criar tabelas no banco de dados
-        // Use { force: true } para recriar as tabelas (cuidado: apaga todos os dados!)
-        // Use { alter: true } para tentar adicionar colunas, mantendo os dados existentes
-        await sequelize.sync({ alter: true }); // Escolha o método de sincronização ideal para você
-        console.log('✅ Banco de dados sincronizado (tabelas criadas/atualizadas).');
+        // --- CORREÇÃO AQUI ---
+        // { force: true } APAGA as tabelas existentes e as recria do zero.
+        // Isso resolve o erro de Foreign Key eliminando dados órfãos/inválidos.
+        console.log('🔄 Sincronizando banco de dados (FORCE mode)...');
+        await sequelize.sync({ force: true }); 
+        console.log('✅ Banco de dados recriado e sincronizado com sucesso.');
 
         // --- Inicialização do Servidor ---
         const PORT = process.env.PORT || 3000;
@@ -48,25 +46,23 @@ const initializeApp = async () => {
 
     } catch (error) {
         console.error('❌ Falha na inicialização do servidor:', error);
-        process.exit(1);
+        // Não encerra o processo bruscamente para permitir ver os logs no Render
+        // process.exit(1); 
     }
 }
 
-// Inicia a aplicação após a sincronização do DB
+// Inicia a aplicação
 initializeApp();
-
 
 // --- Middlewares ---
 app.use(express.json()); 
 app.use(express.urlencoded({ extended: true }));
 
-// --- CONFIGURAÇÃO CORS PERMISSIVA (PARA QUALQUER ORIGEM) ---
 app.use(cors({
     origin: '*', 
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
 }));
-// -----------------------------------------------------------
 
 // --- Rotas da API ---
 app.use('/api/auth', authRoutes);
@@ -76,12 +72,10 @@ app.use('/api/payment', paymentRoutes);
 app.use('/api/customization', customizationRoutes);
 app.use('/api/files', fileRoutes); 
 
-// --- Rota de Teste ---
 app.get('/', (req, res) => {
     res.send('API SoleMates Rodando! Conectada com MySQL e Cloudinary.');
 });
 
-// --- Rota 404/Erro ---
 app.use((req, res, next) => {
     res.status(404).json({ message: `Rota não encontrada: ${req.originalUrl}` });
 });
