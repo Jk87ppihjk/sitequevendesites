@@ -7,10 +7,9 @@ const multer = require('multer');
 const cloudinary = require('./cloudinary'); 
 const fs = require('fs');
 
-// Configuração do Multer para upload temporário
 const upload = multer({ dest: 'uploads/' });
 
-// --- SALVAR CONFIG (Cliente) ---
+// --- SALVAR CONFIG ---
 const saveConfig = async (req, res) => {
     const { 
         siteId, mpAccessToken, frontendUrl, 
@@ -55,7 +54,7 @@ const saveConfig = async (req, res) => {
     }
 };
 
-// --- BUSCAR CONFIG (Admin/Cliente) ---
+// --- BUSCAR CONFIG ---
 const getConfig = async (req, res) => {
     const { siteId, userId } = req.query; 
     
@@ -80,17 +79,16 @@ const getConfig = async (req, res) => {
     }
 };
 
-// --- UPLOAD DO ZIP (Admin) ---
+// --- UPLOAD DO ZIP ---
 const uploadZip = async (req, res) => {
     const { siteId, userId } = req.body;
     const file = req.file;
 
     if (!file || !siteId || !userId) {
-        return res.status(400).json({ message: 'Arquivo ZIP, Site ID e User ID são obrigatórios.' });
+        return res.status(400).json({ message: 'Dados incompletos (Arquivo, SiteID, UserID).' });
     }
 
     try {
-        // Upload para Cloudinary (raw file)
         const result = await cloudinary.uploader.upload(file.path, {
             resource_type: 'raw', 
             folder: 'frontends_clientes',
@@ -99,10 +97,9 @@ const uploadZip = async (req, res) => {
             unique_filename: false
         });
 
-        fs.unlinkSync(file.path); // Remove temp
+        fs.unlinkSync(file.path); 
 
-        // Atualiza URL no banco
-        const [config, created] = await models.SystemConfig.findOrCreate({
+        const [config] = await models.SystemConfig.findOrCreate({
             where: { site_id: siteId, user_id: userId },
             defaults: { site_id: siteId, user_id: userId }
         });
