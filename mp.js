@@ -1,16 +1,19 @@
 // mp.js
-const mercadopago = require('mercadopago');
+const { MercadoPagoConfig } = require('mercadopago');
 const dotenv = require('dotenv');
 
 dotenv.config();
 
 // Configuração do Mercado Pago
-mercadopago.configure({
-    access_token: process.env.MP_ACCESS_TOKEN
+// Cria uma instância da classe MercadoPagoConfig
+const mercadopagoClient = new MercadoPagoConfig({
+    accessToken: process.env.MP_ACCESS_TOKEN,
+    // Define o valor do show_promise_error para false para desativar a exibição do aviso de erro de promessa.
+    show_promise_error: false, 
 });
 
-// A preferência de pagamento será criada no paymentController
+// Nota: Agora você usa mercadopagoClient.preferences.create, etc.
 
 module.exports = {
-    mercadopago
+    mercadopagoClient
 };
