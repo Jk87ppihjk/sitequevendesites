@@ -3,7 +3,6 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
-// const models = require('./models'); // LINHA ORIGINAL REMOVIDA
 const { protect } = require('./authMiddleware');
 
 // CORREÇÃO: Acessa o objeto de modelos inicializados via global
@@ -11,13 +10,8 @@ const models = global.solematesModels;
 
 /**
  * Gera um token JWT para o usuário, incluindo ID, email e nome completo (fullName).
- * @param {object} user Objeto do usuário com id, full_name e email.
- * @returns {string} Token JWT
  */
 const generateToken = (user) => {
-    // CORREÇÃO: Incluir o email e o nome completo no payload do token.
-    // O frontend espera 'email' e 'fullName' (ou full_name). Usaremos 'fullName'
-    // para corresponder ao que o frontend tenta ler.
     return jwt.sign({ 
         id: user.id,
         email: user.email,
@@ -33,7 +27,6 @@ const generateToken = (user) => {
  * @access Public
  */
 const registerUser = async (req, res) => {
-    // CORRIGIDO: Agora espera 'full_name' conforme enviado pelo frontend.
     const { full_name, email, password } = req.body;
 
     if (!full_name || !email || !password) {
@@ -48,10 +41,10 @@ const registerUser = async (req, res) => {
         }
 
         const user = await models.User.create({
-            full_name: full_name, // Usa o campo corrigido
+            full_name: full_name,
             email,
             password,
-            role: 'user', // Garante que novos usuários sejam 'user'
+            role: 'user',
         });
 
         if (user) {
@@ -60,7 +53,6 @@ const registerUser = async (req, res) => {
                 fullName: user.full_name,
                 email: user.email,
                 role: user.role,
-                // CORREÇÃO: Passa o objeto 'user' para generateToken
                 token: generateToken(user),
             });
         } else {
@@ -80,21 +72,44 @@ const registerUser = async (req, res) => {
 const loginUser = async (req, res) => {
     const { email, password } = req.body;
 
+    // ➡️ LOG 1: Recebimento da requisição
+    console.log(`[LOGIN ATTEMPT] Iniciando tentativa de login para: ${email}`); 
+
     try {
-        // CORREÇÃO: models.User agora está definido, permitindo o findOne.
         const user = await models.User.findOne({ where: { email } });
 
-        // Verifica a senha se o usuário existir
-        if (user && (await bcrypt.compare(password, user.password))) {
+        // 🔎 LOG 2: Verificação do usuário no DB
+        if (!user) {
+            console.warn(`[LOGIN FAILURE] Usuário não encontrado no DB para email: ${email}`);
+            res.status(401).json({ message: 'Email ou senha inválidos.' });
+            return;
+        } 
+        
+        // 🔑 LOG 3: Dados de comparação (NÃO EXPOR SENHAS COMPLETAS)
+        console.log(`[LOGIN DEBUG] Usuário encontrado (ID: ${user.id}, Role: ${user.role}).`);
+        console.log(`[LOGIN DEBUG] Senha recebida (parcial): ${password.substring(0, 3)}...`);
+        console.log(`[LOGIN DEBUG] Hash salvo no DB (parcial): ${user.password.substring(0, 10)}...`);
+
+
+        // Verifica a senha
+        const passwordMatch = await bcrypt.compare(password, user.password);
+        
+        // 🚫 LOG 4: Resultado da comparação
+        console.log(`[LOGIN DEBUG] Resultado do bcrypt.compare: ${passwordMatch}`);
+
+        if (passwordMatch) {
+            // 🎉 LOG 5: Sucesso!
+            console.log(`[LOGIN SUCCESS] Login realizado para o usuário ID: ${user.id}`);
             res.json({
                 id: user.id,
                 fullName: user.full_name,
                 email: user.email,
                 role: user.role,
-                // CORREÇÃO: Passa o objeto 'user' para generateToken
                 token: generateToken(user),
             });
         } else {
+            // ❌ LOG 6: Falha na senha
+            console.error(`[LOGIN FAILURE] Comparação de senha falhou para email: ${email}`);
             res.status(401).json({ message: 'Email ou senha inválidos.' });
         }
     } catch (error) {
