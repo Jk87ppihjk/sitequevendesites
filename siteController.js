@@ -1,9 +1,7 @@
 // siteController.js
 const express = require('express');
 const router = express.Router();
-// CORREÇÃO: Acessa o objeto de modelos inicializados via global
 const models = global.solematesModels; 
-// CORREÇÃO 1: Importar 'protect' também
 const { protect, admin } = require('./authMiddleware');
 const { cloudinary } = require('./cloudinary');
 const multer = require('multer');
@@ -18,25 +16,20 @@ const upload = multer({ storage: storage });
  * @access Private/Admin
  */
 const createSite = async (req, res) => {
-    // 'image' é o nome do campo de arquivo no formulário
     const imageFile = req.file; 
     const { name, description, priceSale, priceRent, siteLink, additionalLinks } = req.body;
 
-    // Validação básica
     if (!imageFile || !name || !description || !siteLink) {
         return res.status(400).json({ message: 'Campos obrigatórios faltando (Imagem, Nome, Descrição, Link do Site).' });
     }
 
     try {
-        // 1. Upload da imagem para o Cloudinary
         const result = await cloudinary.uploader.upload(`data:image/jpeg;base64,${imageFile.buffer.toString('base64')}`, {
             folder: 'solemates_sites',
             allowed_formats: ['jpg', 'png', 'jpeg'],
         });
 
         const mainImageUrl = result.secure_url;
-
-        // 2. Processa links adicionais
         let processedLinks = [];
         if (additionalLinks) {
             try {
@@ -46,7 +39,6 @@ const createSite = async (req, res) => {
             }
         }
 
-        // 3. Cria o registro do Site no banco de dados
         const site = await models.Site.create({
             name,
             description,
@@ -55,7 +47,6 @@ const createSite = async (req, res) => {
             main_image_url: mainImageUrl,
             site_link: siteLink,
             additional_links: processedLinks,
-            // is_available é true por padrão (no models.js), o que está correto
         });
 
         res.status(201).json(site);
@@ -74,16 +65,12 @@ const createSite = async (req, res) => {
 const getSites = async (req, res) => {
     try {
         const sites = await models.Site.findAll({
-            // Filtro para mostrar apenas sites disponíveis
-            where: { is_available: true }, 
+            // CORREÇÃO: Usa 1 (TinyInt) para garantir que o filtro funcione
+            where: { is_available: 1 },
             order: [['createdAt', 'DESC']]
         });
         
-        // Se a busca retornar vazia, retorna uma mensagem clara
-        if (sites.length === 0) {
-            return res.status(200).json({ message: 'Nenhum site encontrado com os filtros aplicados.' });
-        }
-        
+        // Retorna um array vazio se não encontrar (Status 200), que o frontend lida corretamente
         res.json(sites);
 
     } catch (error) {
@@ -100,10 +87,9 @@ const getSites = async (req, res) => {
 const getSiteDetails = async (req, res) => {
     try {
         const site = await models.Site.findByPk(req.params.id, {
-            // Inclui comentários e o nome do usuário que comentou
             include: [{
                 model: models.Comment,
-                // O models.js corrigido garante que created_at seja usado no DB
+                // Garantido pelo models.js, mas listado explicitamente:
                 attributes: ['id', 'rating', 'comment_text', 'created_at'], 
                 include: [{
                     model: models.User,
@@ -112,7 +98,8 @@ const getSiteDetails = async (req, res) => {
             }],
         });
 
-        if (site) {
+        // Dupla checagem: se o site existe E se está marcado como disponível (is_available = 1)
+        if (site && site.is_available) { 
             const totalRating = site.Comments.reduce((sum, comment) => sum + comment.rating, 0);
             const averageRating = site.Comments.length > 0 ? (totalRating / site.Comments.length).toFixed(1) : 0;
             
@@ -134,8 +121,6 @@ const getSiteDetails = async (req, res) => {
 
 router.get('/', getSites);
 router.get('/:id', getSiteDetails);
-
-// O middleware 'protect' injeta req.user, que o 'admin' usa para checar a role.
 router.post('/', protect, admin, upload.single('image'), createSite);
 
 module.exports = router;
