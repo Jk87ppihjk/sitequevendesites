@@ -1,6 +1,7 @@
 // siteController.js
 const express = require('express');
 const router = express.Router();
+// Garante que usa os modelos globais inicializados
 const models = global.solematesModels; 
 const { protect, admin } = require('./authMiddleware');
 const { cloudinary } = require('./cloudinary');
@@ -65,12 +66,12 @@ const createSite = async (req, res) => {
 const getSites = async (req, res) => {
     try {
         const sites = await models.Site.findAll({
-            // CORREÇÃO: Usa 1 (TinyInt) para garantir que o filtro funcione
+            // Usa 1 para garantir compatibilidade com TINYINT/BOOLEAN
             where: { is_available: 1 },
+            // Ordena pela data de criação (createdAt)
             order: [['createdAt', 'DESC']]
         });
         
-        // Retorna um array vazio se não encontrar (Status 200), que o frontend lida corretamente
         res.json(sites);
 
     } catch (error) {
@@ -89,8 +90,8 @@ const getSiteDetails = async (req, res) => {
         const site = await models.Site.findByPk(req.params.id, {
             include: [{
                 model: models.Comment,
-                // Garantido pelo models.js, mas listado explicitamente:
-                attributes: ['id', 'rating', 'comment_text', 'created_at'], 
+                // CORREÇÃO CRÍTICA AQUI: Trocado 'created_at' por 'createdAt'
+                attributes: ['id', 'rating', 'comment_text', 'createdAt'], 
                 include: [{
                     model: models.User,
                     attributes: ['full_name'],
@@ -98,15 +99,16 @@ const getSiteDetails = async (req, res) => {
             }],
         });
 
-        // Dupla checagem: se o site existe E se está marcado como disponível (is_available = 1)
         if (site && site.is_available) { 
-            const totalRating = site.Comments.reduce((sum, comment) => sum + comment.rating, 0);
-            const averageRating = site.Comments.length > 0 ? (totalRating / site.Comments.length).toFixed(1) : 0;
+            // Calcula a média de avaliações manualmente para garantir precisão
+            const comments = site.Comments || [];
+            const totalRating = comments.reduce((sum, comment) => sum + comment.rating, 0);
+            const averageRating = comments.length > 0 ? (totalRating / comments.length).toFixed(1) : 0;
             
             res.json({
                 ...site.toJSON(),
                 average_rating: parseFloat(averageRating),
-                review_count: site.Comments.length,
+                review_count: comments.length,
             });
         } else {
             res.status(404).json({ message: 'Site não encontrado.' });
