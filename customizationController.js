@@ -4,31 +4,25 @@ const router = express.Router();
 const models = require('./models');
 const { protect, admin } = require('./authMiddleware');
 const multer = require('multer');
-const cloudinary = require('./cloudinary'); // Certifique-se que este arquivo existe e exporta o cloudinary configurado
+const cloudinary = require('./cloudinary'); 
 const fs = require('fs');
 
 // Configuração do Multer para upload temporário
 const upload = multer({ dest: 'uploads/' });
 
-/**
- * SALVAR CONFIGURAÇÃO (Cliente)
- */
+// --- SALVAR CONFIG (Cliente) ---
 const saveConfig = async (req, res) => {
     const { 
-        siteId, 
-        mpAccessToken, frontendUrl, 
+        siteId, mpAccessToken, frontendUrl, 
         dbHost, dbName, dbUser, dbPassword, 
         cloudinaryName, cloudinaryApiKey, cloudinaryApiSecret, 
-        brevoApiKey, 
-        visualStyle 
+        brevoApiKey, visualStyle 
     } = req.body;
 
     if (!siteId) return res.status(400).json({ message: 'Site ID obrigatório.' });
 
     try {
-        const userId = req.user.id; // ID do usuário logado
-
-        // Mapeia para o banco de dados
+        const userId = req.user.id; 
         const configData = {
             site_id: siteId,
             user_id: userId,
@@ -45,7 +39,6 @@ const saveConfig = async (req, res) => {
             visual_style: visualStyle,
         };
 
-        // Procura ou cria a configuração
         const [config, created] = await models.SystemConfig.findOrCreate({
             where: { site_id: siteId, user_id: userId },
             defaults: configData
@@ -54,23 +47,18 @@ const saveConfig = async (req, res) => {
         if (!created) {
             await config.update(configData);
         }
-
-        res.json({ message: 'Configuração salva com sucesso!', config });
+        res.json({ message: 'Configuração salva!', config });
 
     } catch (error) {
-        console.error('Erro ao salvar config:', error);
-        res.status(500).json({ message: 'Erro interno ao salvar configurações.' });
+        console.error('Erro salvar config:', error);
+        res.status(500).json({ message: 'Erro interno.' });
     }
 };
 
-/**
- * BUSCAR CONFIGURAÇÃO (Admin ou Cliente)
- */
+// --- BUSCAR CONFIG (Admin/Cliente) ---
 const getConfig = async (req, res) => {
     const { siteId, userId } = req.query; 
     
-    // Se for admin e passar userId, vê a config daquele usuário.
-    // Se for cliente, vê a própria config.
     let targetUserId = req.user.id;
     if (req.user.role === 'admin' && userId) {
         targetUserId = userId;
@@ -83,21 +71,16 @@ const getConfig = async (req, res) => {
             where: { site_id: siteId, user_id: targetUserId }
         });
 
-        if (!config) {
-            return res.status(404).json({ message: 'Configuração não encontrada.' });
-        }
-
+        if (!config) return res.status(404).json({ message: 'Configuração não encontrada.' });
         res.json(config);
 
     } catch (error) {
-        console.error('Erro busca config:', error);
-        res.status(500).json({ message: 'Erro interno ao buscar configurações.' });
+        console.error('Erro buscar config:', error);
+        res.status(500).json({ message: 'Erro interno.' });
     }
 };
 
-/**
- * UPLOAD DO ZIP FRONTEND (Apenas Admin)
- */
+// --- UPLOAD DO ZIP (Admin) ---
 const uploadZip = async (req, res) => {
     const { siteId, userId } = req.body;
     const file = req.file;
@@ -107,9 +90,7 @@ const uploadZip = async (req, res) => {
     }
 
     try {
-        console.log(`Iniciando upload do ZIP para Site ${siteId}, Usuário ${userId}`);
-
-        // 1. Upload para o Cloudinary (Resource Type: raw para arquivos ZIP)
+        // Upload para Cloudinary (raw file)
         const result = await cloudinary.uploader.upload(file.path, {
             resource_type: 'raw', 
             folder: 'frontends_clientes',
@@ -118,10 +99,9 @@ const uploadZip = async (req, res) => {
             unique_filename: false
         });
 
-        // 2. Remove o arquivo temporário
-        fs.unlinkSync(file.path);
+        fs.unlinkSync(file.path); // Remove temp
 
-        // 3. Salva a URL no banco de dados
+        // Atualiza URL no banco
         const [config, created] = await models.SystemConfig.findOrCreate({
             where: { site_id: siteId, user_id: userId },
             defaults: { site_id: siteId, user_id: userId }
@@ -129,20 +109,17 @@ const uploadZip = async (req, res) => {
 
         await config.update({ frontend_zip_url: result.secure_url });
 
-        res.json({ message: 'Upload realizado com sucesso!', url: result.secure_url });
+        res.json({ message: 'Upload realizado!', url: result.secure_url });
 
     } catch (error) {
-        console.error('Erro no upload ZIP:', error);
-        // Tenta remover o arquivo temporário se der erro
-        if (file && file.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
-        res.status(500).json({ message: 'Erro ao fazer upload do arquivo.' });
+        console.error('Erro upload ZIP:', error);
+        if (file && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        res.status(500).json({ message: 'Erro ao fazer upload.' });
     }
 };
 
-// --- ROTAS ---
 router.post('/', protect, saveConfig); 
 router.get('/', protect, getConfig); 
-// Rota de Upload (Campo do arquivo deve ser 'frontendZip')
 router.post('/upload-zip', protect, admin, upload.single('frontendZip'), uploadZip);
 
 module.exports = router;
