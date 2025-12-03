@@ -1,7 +1,6 @@
 // siteController.js
 const express = require('express');
 const router = express.Router();
-// const models = require('./models'); // LINHA ORIGINAL REMOVIDA
 // CORREÇÃO: Acessa o objeto de modelos inicializados via global
 const models = global.solematesModels; 
 // CORREÇÃO 1: Importar 'protect' também
@@ -56,6 +55,7 @@ const createSite = async (req, res) => {
             main_image_url: mainImageUrl,
             site_link: siteLink,
             additional_links: processedLinks,
+            // is_available é true por padrão (no models.js), o que está correto
         });
 
         res.status(201).json(site);
@@ -74,12 +74,18 @@ const createSite = async (req, res) => {
 const getSites = async (req, res) => {
     try {
         const sites = await models.Site.findAll({
-            where: { is_available: true },
-            // CORREÇÃO CRÍTICA: O atributo do modelo Sequelize é 'createdAt' (camelCase).
-            // Com 'underscored: true' no models.js, o Sequelize fará o mapeamento correto para 'created_at' no SQL.
+            // Filtro para mostrar apenas sites disponíveis
+            where: { is_available: true }, 
             order: [['createdAt', 'DESC']]
         });
+        
+        // Se a busca retornar vazia, retorna uma mensagem clara
+        if (sites.length === 0) {
+            return res.status(200).json({ message: 'Nenhum site encontrado com os filtros aplicados.' });
+        }
+        
         res.json(sites);
+
     } catch (error) {
         console.error('Erro ao listar sites:', error);
         res.status(500).json({ message: 'Erro interno ao buscar sites.' });
@@ -94,10 +100,11 @@ const getSites = async (req, res) => {
 const getSiteDetails = async (req, res) => {
     try {
         const site = await models.Site.findByPk(req.params.id, {
+            // Inclui comentários e o nome do usuário que comentou
             include: [{
                 model: models.Comment,
-                // Os atributos devem usar snake_case se o modelo Comment tiver 'underscored: true'
-                attributes: ['id', 'rating', 'comment_text', 'created_at'],
+                // O models.js corrigido garante que created_at seja usado no DB
+                attributes: ['id', 'rating', 'comment_text', 'created_at'], 
                 include: [{
                     model: models.User,
                     attributes: ['full_name'],
@@ -128,7 +135,6 @@ const getSiteDetails = async (req, res) => {
 router.get('/', getSites);
 router.get('/:id', getSiteDetails);
 
-// CORREÇÃO 2: Adicionar 'protect' antes de 'admin'
 // O middleware 'protect' injeta req.user, que o 'admin' usa para checar a role.
 router.post('/', protect, admin, upload.single('image'), createSite);
 
