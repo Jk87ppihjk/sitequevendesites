@@ -7,8 +7,17 @@ const cors = require('cors');
 dotenv.config();
 
 // Módulos Internos
-const { connectDB } = require('./database');
-const models = require('./models');
+// CORREÇÃO 1: Importar a instância 'sequelize' e a função 'connectDB'
+const { connectDB, sequelize } = require('./database'); 
+// CORREÇÃO 2: Importar apenas a função 'initModels'
+const { initModels } = require('./models'); 
+
+// 3. Inicializar os modelos ANTES de carregar os controladores de rota
+const initializedModels = initModels(sequelize);
+
+// 4. ATENÇÃO: Definir os modelos no escopo global para que os controllers possam acessá-los
+global.solematesModels = initializedModels; 
+
 
 // Controladores de Rotas
 const authRoutes = require('./authController');
@@ -21,7 +30,7 @@ const fileRoutes = require('./fileController');
 const app = express();
 
 // --- Conexão com o Banco de Dados ---
-connectDB(models);
+connectDB(); // Apenas chama a conexão. A inicialização dos modelos já ocorreu acima.
 
 // --- Middlewares ---
 app.use(express.json()); 
