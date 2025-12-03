@@ -15,6 +15,7 @@ const authRoutes = require('./authController');
 const siteRoutes = require('./siteController');
 const orderRoutes = require('./orderController');
 const paymentRoutes = require('./paymentController');
+const customizationRoutes = require('./customizationController'); // NOVO: Importa o novo controlador
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/sites', siteRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/payment', paymentRoutes);
+app.use('/api/customization', customizationRoutes); // NOVO: Adiciona a rota
 
 // --- Rota de Teste ---
 app.get('/', (req, res) => {
