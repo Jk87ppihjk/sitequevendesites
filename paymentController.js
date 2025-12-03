@@ -2,7 +2,8 @@
 const express = require('express');
 const router = express.Router();
 const models = require('./models');
-const { mercadopago } = require('./mp');
+// Altera a importação para o novo nome
+const { mercadopagoClient } = require('./mp'); 
 const { protect } = require('./authMiddleware');
 
 /**
@@ -46,44 +47,42 @@ const createPreference = async (req, res) => {
             purchase_type: purchaseType,
             transaction_amount: price,
             status: 'pending',
-            // rent_expiry_date será definida no webhook se for aluguel e for aprovado
         });
 
         // 2. Cria a preferência de pagamento no Mercado Pago
-        const preference = {
-            items: [
-                {
-                    title: title,
-                    unit_price: price,
-                    quantity: 1,
-                    currency_id: 'BRL', // Assumindo moeda Brasileira
-                }
-            ],
-            // URL de retorno após a conclusão do pagamento no MP
-            back_urls: {
-                success: `${process.env.FRONTEND_URL}/compra-concluida`,
-                failure: `${process.env.FRONTEND_URL}/pagamento-falhou`,
-                pending: `${process.env.FRONTEND_URL}/pagamento-pendente`,
-            },
-            // URL para o MP notificar o backend sobre o status
-            notification_url: `${process.env.BACKEND_URL}/api/payment/webhook?source=mercadopago`,
-            auto_return: 'approved',
-            external_reference: order.id.toString(), // ID do pedido para rastreamento
+        const preferenceData = {
+            body: { // Adicionado 'body' para o novo SDK
+                items: [
+                    {
+                        title: title,
+                        unit_price: price,
+                        quantity: 1,
+                        currency_id: 'BRL',
+                    }
+                ],
+                back_urls: {
+                    success: `${process.env.FRONTEND_URL}/compra-concluida`,
+                    failure: `${process.env.FRONTEND_URL}/pagamento-falhou`,
+                    pending: `${process.env.FRONTEND_URL}/pagamento-pendente`,
+                },
+                notification_url: `${process.env.BACKEND_URL}/api/payment/webhook?source=mercadopago`,
+                auto_return: 'approved',
+                external_reference: order.id.toString(),
+            }
         };
 
-        const mpResponse = await mercadopago.preferences.create(preference);
+        // Usa mercadopagoClient.preferences.create
+        const mpResponse = await mercadopagoClient.preferences.create(preferenceData);
         
         // 3. Atualiza o pedido com o ID da preferência do MP
-        order.mp_preference_id = mpResponse.body.id;
+        order.mp_preference_id = mpResponse.id; // No novo SDK, o ID está diretamente no objeto
         await order.save();
 
 
         // Retorna o ID da preferência ou o link para o frontend
         res.json({
-            preferenceId: mpResponse.body.id,
-            // O frontend usará este ID para renderizar o botão de pagamento (MP Checkout Pro)
-            // ou redirecionar o usuário (se não for in-site checkout)
-            initPoint: mpResponse.body.init_point
+            preferenceId: mpResponse.id,
+            initPoint: mpResponse.init_point
         });
 
 
@@ -106,9 +105,10 @@ const handleWebhook = async (req, res) => {
     if (topic === 'payment' && id) {
         try {
             // 1. Busca os detalhes do pagamento no MP
-            const payment = await mercadopago.payment.findById(id);
-            const paymentData = payment.body;
-            
+            // O novo SDK usa o módulo 'payments' e o método 'get'
+            const payment = await mercadopagoClient.payments.get({ id }); 
+            const paymentData = payment; // O objeto de pagamento está diretamente no retorno
+
             // 2. Obtém a Referência Externa (ID do nosso Pedido)
             const orderId = paymentData.external_reference;
             const order = await models.Order.findByPk(orderId);
@@ -153,7 +153,6 @@ const handleWebhook = async (req, res) => {
 // --- Definição das Rotas de Pagamento ---
 router.post('/create-preference', protect, createPreference);
 router.post('/webhook', handleWebhook);
-// Adicionado rota GET para o MP testar se a URL está correta (embora a documentação recomende POST)
 router.get('/webhook', handleWebhook); 
 
 module.exports = router;
