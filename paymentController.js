@@ -1,4 +1,4 @@
-// paymentController.js (versão corrigida)
+// paymentController.js (versão corrigida e otimizada para Bricks)
 // ==========================
 // BACKEND (Node.js / Express)
 // ==========================
@@ -25,6 +25,7 @@ const createPreference = async (req, res) => {
         console.log("[BODY RECEBIDO]:", req.body);
 
         const { siteId, purchaseType, price, siteName, customer } = req.body;
+        // Assume-se que 'req.user' é definido pelo middleware 'protect'
         const userId = req.user && req.user.id;
 
         if (!userId) {
@@ -66,7 +67,6 @@ const createPreference = async (req, res) => {
         const nameParts = splitName(fullName);
 
         // Garantir telefone mínimo (evita validações do MP)
-        // Tente usar dados reais se disponíveis; caso contrário, use mocks válidos.
         const phoneObj = (customer && customer.phone) ? {
             area_code: String(customer.phone.area_code || '').replace(/\D/g, '').slice(0, 2) || '11',
             number: String(customer.phone.number || '').replace(/\D/g, '').slice(0, 9) || '999999999'
@@ -93,13 +93,15 @@ const createPreference = async (req, res) => {
                     }
                 ],
 
-                // Use o formato básico aceito pelo Preference API.
-                // Não inventamos sub-objetos exóticos; isso evita rejeição pelo Bricks.
-                payment_methods: {
-                    excluded_payment_methods: [],
-                    excluded_payment_types: [],
-                    installments: 1
-                },
+                // **CORREÇÃO CRÍTICA**: Removendo o bloco 'payment_methods'.
+                // O erro "No payment type was selected" ocorre porque este bloco, mesmo vazio
+                // ou com 'installments: 1', está impedindo o Bricks de carregar o PIX e Cartões
+                // na inicialização. Deixaremos o Mercado Pago aplicar a lógica padrão.
+                // payment_methods: {
+                //     excluded_payment_methods: [],
+                //     excluded_payment_types: [],
+                //     installments: 1
+                // },
 
                 payer: {
                     email: email,
@@ -133,35 +135,23 @@ const createPreference = async (req, res) => {
             }
         };
 
-        // Observação: em contas com PIX habilitado o MP irá permitir PIX automaticamente.
-        // Se quiser forçar explicitamente PIX, você pode incluir campos adicionais aqui
-        // mas a forma acima é a mais compatível para Bricks.
+        // Adicionando um log mais limpo da preferência enviada
+        console.log("[createPreference] preferenceData FINAL (para MP):", JSON.stringify(preferenceData.body, null, 2));
 
-        console.log("[createPreference] preferenceData (preview):", {
-            items: preferenceData.body.items,
-            payer: {
-                email: preferenceData.body.payer.email,
-                first_name: preferenceData.body.payer.first_name,
-                last_name: preferenceData.body.payer.last_name,
-                identification: preferenceData.body.payer.identification
-            },
-            payment_methods: preferenceData.body.payment_methods,
-            external_reference: preferenceData.body.external_reference
-        });
 
         // Cria preferência no MP (SDK)
         const mpResponse = await preferenceModule.create(preferenceData);
 
         console.log("[createPreference] Preferência criada com sucesso!");
         console.log("MP Preference ID:", mpResponse.id);
-        console.log("MP Preference API Response keys:", Object.keys(mpResponse || {}));
-        // Se disponível, logue o conteúdo bruto para depuração (use com cautela).
+        
+        // Log de resumo da resposta
         if (mpResponse.api_response) {
             console.log("[createPreference] mpResponse.api_response resumo:", {
                 id: mpResponse.api_response.id,
                 total_amount: mpResponse.api_response.total_amount,
                 items: mpResponse.api_response.items && mpResponse.api_response.items.map(i => ({ title: i.title, unit_price: i.unit_price })),
-                payment_methods: mpResponse.api_response.payment_methods
+                payment_methods: mpResponse.api_response.payment_methods // <- **IMPORTANTE:** Verifique se esta chave existe e tem métodos.
             });
         }
 
@@ -171,6 +161,7 @@ const createPreference = async (req, res) => {
 
         console.log("[createPreference] Preferência salva no banco ✔️");
 
+        // Retorna apenas o essencial para o frontend
         res.json({
             preferenceId: mpResponse.id,
             initPoint: mpResponse.init_point
@@ -178,9 +169,8 @@ const createPreference = async (req, res) => {
 
     } catch (err) {
         console.error("🔥 ERRO NO createPreference:", err);
-        // Para facilitar debug, retornamos também o stack em dev (remova em produção)
         res.status(500).json({
-            message: "Erro interno ao criar preferência.",
+            message: "Erro interno ao criar preferência. Detalhes: " + err.message,
             error: err.message
         });
     }
@@ -207,7 +197,8 @@ const handleWebhook = async (req, res) => {
         if (payment.status === "approved") {
             newStatus = order.purchase_type === "rent" ? "rented" : "completed";
             if (order.purchase_type === "rent") {
-                order.rent_expiry_date = new Date(Date.now() + 30 * 86400000);
+                // Adiciona 30 dias à data atual
+                order.rent_expiry_date = new Date(Date.now() + 30 * 86400000); 
             }
         } else if (payment.status === "pending") newStatus = "pending";
         else if (payment.status === "rejected") newStatus = "rejected";
