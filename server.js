@@ -1,4 +1,4 @@
-// server.js (VERSÃO CORRIGIDA ESTRUTURALMENTE)
+// server.js (VERSÃO FINAL ESTRUTURALMENTE CORRIGIDA)
 const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
@@ -58,7 +58,8 @@ const initializeApp = async () => {
         // ---------------------------------------------
         
         // --- IMPORTAÇÃO E USO DAS ROTAS (CORREÇÃO ESTRUTURAL) ---
-        // As rotas SÓ SÃO importadas APÓS global.solematesModels estar definido e o DB sincronizado.
+        // As rotas SÓ SÃO importadas APÓS a inicialização completa dos modelos.
+        // Isto resolve a falha de 'require' síncrono.
         const authRoutes = require('./authController');
         const siteRoutes = require('./siteController');
         const orderRoutes = require('./orderController');
@@ -82,7 +83,6 @@ const initializeApp = async () => {
 
     } catch (error) {
         console.error('❌ Falha na inicialização do servidor:', error);
-        // Em um ambiente de produção, é melhor deixar o processo rodar para não causar loop de restart
     }
 }
 
