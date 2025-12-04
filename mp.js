@@ -1,19 +1,24 @@
 // mp.js
-const { MercadoPagoConfig } = require('mercadopago');
-const dotenv = require('dotenv');
+import { MercadoPagoConfig, Preference, Payment } from 'mercadopago';
+import dotenv from 'dotenv';
 
+// Carrega variáveis de ambiente
 dotenv.config();
 
-// Configuração do Mercado Pago
-// Cria uma instância da classe MercadoPagoConfig
-const mercadopagoClient = new MercadoPagoConfig({
+// Validação para evitar erro humano de esquecer a chave
+if (!process.env.MP_ACCESS_TOKEN) {
+    console.error("ERRO CRÍTICO: MP_ACCESS_TOKEN não definido no arquivo .env");
+    process.exit(1);
+}
+
+// Configuração do Cliente
+const client = new MercadoPagoConfig({ 
     accessToken: process.env.MP_ACCESS_TOKEN,
-    // Define o valor do show_promise_error para false para desativar a exibição do aviso de erro de promessa.
-    show_promise_error: false, 
+    options: { timeout: 5000 } // Timeout para evitar travamentos
 });
 
-// Nota: Agora você usa mercadopagoClient.preferences.create, etc.
+// Inicializa as APIs necessárias
+const preference = new Preference(client);
+const payment = new Payment(client);
 
-module.exports = {
-    mercadopagoClient
-};
+export { preference, payment };
