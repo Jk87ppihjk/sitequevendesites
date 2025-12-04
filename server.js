@@ -1,4 +1,4 @@
-// server.js
+// server.js (VERSÃO CORRIGIDA ESTRUTURALMENTE)
 const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
@@ -11,28 +11,30 @@ dotenv.config();
 const { connectDB, sequelize } = require('./database'); 
 const { initModels } = require('./models'); 
 
-// 1. Inicializar os modelos
-const initializedModels = initModels(sequelize);
-
-// 2. Definir os modelos no escopo global (Corrige o erro de importação de modelos)
-global.solematesModels = initializedModels; 
-
-// Controladores de Rotas (IMPORTAÇÃO ÚNICA AQUI)
-const authRoutes = require('./authController');
-const siteRoutes = require('./siteController');
-const orderRoutes = require('./orderController');
-const paymentRoutes = require('./paymentController');
-const customizationRoutes = require('./customizationController');
-const fileRoutes = require('./fileController');
-
 const app = express();
+
+// --- Middlewares (Mantidos no escopo global para o app) ---
+app.use(express.json()); 
+app.use(express.urlencoded({ extended: true }));
+
+app.use(cors({
+    origin: '*', 
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true,
+}));
 
 // --- Conexão e Sincronização com o Banco de Dados ---
 const initializeApp = async () => {
     try {
         await connectDB();
         
-        // CORREÇÃO CRÍTICA: Não usar { force: true } para evitar a perda do admin
+        // 1. Inicializar os modelos
+        const initializedModels = initModels(sequelize);
+
+        // 2. Definir os modelos no escopo global (ANTES de importar as rotas)
+        global.solematesModels = initializedModels; 
+
+        // 3. Sincronizar o banco de dados (AQUI OS MODELOS ESTÃO PRONTOS)
         console.log('🔄 Sincronizando banco de dados (ALTER mode)...');
         await sequelize.sync({ alter: true }); 
         console.log('✅ Banco de dados sincronizado com sucesso.');
@@ -54,6 +56,23 @@ const initializeApp = async () => {
             console.log('👑 Usuário Admin criado automaticamente: admin@solemate.com / admin123');
         }
         // ---------------------------------------------
+        
+        // --- IMPORTAÇÃO E USO DAS ROTAS (CORREÇÃO ESTRUTURAL) ---
+        // As rotas SÓ SÃO importadas APÓS global.solematesModels estar definido e o DB sincronizado.
+        const authRoutes = require('./authController');
+        const siteRoutes = require('./siteController');
+        const orderRoutes = require('./orderController');
+        const paymentRoutes = require('./paymentController');
+        const customizationRoutes = require('./customizationController');
+        const fileRoutes = require('./fileController');
+
+        app.use('/api/auth', authRoutes);
+        app.use('/api/sites', siteRoutes);
+        app.use('/api/orders', orderRoutes);
+        app.use('/api/payment', paymentRoutes);
+        app.use('/api/customization', customizationRoutes);
+        app.use('/api/files', fileRoutes); 
+        // ---------------------------------------------------------
 
         // --- Inicialização do Servidor ---
         const PORT = process.env.PORT || 3000;
@@ -69,24 +88,6 @@ const initializeApp = async () => {
 
 // Inicia a aplicação
 initializeApp();
-
-// --- Middlewares ---
-app.use(express.json()); 
-app.use(express.urlencoded({ extended: true }));
-
-app.use(cors({
-    origin: '*', 
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    credentials: true,
-}));
-
-// --- Rotas da API (USO ÚNICO DOS IMPORTS) ---
-app.use('/api/auth', authRoutes);
-app.use('/api/sites', siteRoutes);
-app.use('/api/orders', orderRoutes);
-app.use('/api/payment', paymentRoutes);
-app.use('/api/customization', customizationRoutes);
-app.use('/api/files', fileRoutes); 
 
 app.get('/', (req, res) => {
     res.send('API SoleMates Rodando! Conectada com MySQL e Cloudinary.');
