@@ -4,8 +4,8 @@ const router = express.Router();
 const { mercadopagoClient } = require('./mp');
 const { protect } = require('./authMiddleware');
 
-// Acessa o objeto de modelos inicializados via global
-const models = global.solematesModels;
+// REMOVIDO: const models = global.solematesModels; // O acesso aqui pode ser muito cedo (undefined)
+
 
 /**
  * @route POST /api/payment/create-payment
@@ -13,9 +13,18 @@ const models = global.solematesModels;
  * @access Private (Auth)
  */
 const createPayment = async (req, res) => {
+    // Acessa o objeto de modelos inicializados via global DENTRO DA FUNÇÃO
+    const models = global.solematesModels;
+    
+    // --- CHECK CRÍTICO DE INICIALIZAÇÃO ---
+    if (!models || !models.Site || !models.Order) {
+        console.error('[MP_BACKEND_LOG] ❌ CRITICAL: Modelos do Banco de Dados não inicializados ou carregados corretamente.');
+        return res.status(500).json({ message: 'Erro interno do servidor: Falha na inicialização dos modelos (Site/Order).' });
+    }
+    // -------------------------------------
+
     // Dados enviados pelo frontend (após o Card Brick tokenizar ou selecionar Pix)
     const { siteId, purchaseType, price, customer, paymentData, paymentMethod } = req.body;
-    // O req.user é definido pelo middleware 'protect'
     const userId = req.user ? req.user.id : null; 
 
     console.log(`[MP_BACKEND_LOG] Requisição de Pagamento recebida. Método: ${paymentMethod}, UserID: ${userId}`);
@@ -28,7 +37,7 @@ const createPayment = async (req, res) => {
         return res.status(400).json({ message: 'Dados do pedido incompletos.' });
     }
     
-    // Se o middleware protect falhou, o userId será nulo (o 401 já teria sido enviado, mas verificamos por segurança)
+    // Se o middleware protect falhou, o 401 já teria sido enviado (verificamos por segurança)
     if (!userId) {
          console.error('[MP_BACKEND_LOG] Erro 401: Tentativa de acesso sem autenticação válida.');
          return res.status(401).json({ message: 'Não autorizado, token ausente ou inválido.' });
@@ -42,15 +51,13 @@ const createPayment = async (req, res) => {
             return res.status(404).json({ message: 'Site não encontrado.' });
         }
 
-        // --- 1. PREPARAÇÃO DOS DADOS DO PAGADOR (ROBUSTA) ---
+        // --- 1. PREPARAÇÃO DOS DADOS DO PAGADOR ---
         const amount = parseFloat(price);
         const rawDoc = customer.cpfCnpj.replace(/\D/g, '');
         const identificationType = rawDoc.length === 11 ? 'CPF' : 'CNPJ';
 
-        // Lógica mais robusta para split de nome
         const nameParts = customer.fullName.trim().split(' ');
         const firstName = nameParts[0] || 'Cliente';
-        // Se houver mais de uma palavra, o restante é o sobrenome, senão usa o nome completo
         const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : nameParts[0]; 
         
         const payer = {
@@ -75,8 +82,6 @@ const createPayment = async (req, res) => {
             transaction_amount: amount,
             description: purchaseType === 'sale' ? `Compra do Site: ${site.name}` : `Aluguel do Site: ${site.name} (30 dias)`,
             payer: payer,
-            // URL de notificação para o Mercado Pago enviar atualizações (Webhook)
-            // Assumimos que BACKEND_URL está definido no .env
             notification_url: `${process.env.BACKEND_URL || 'http://localhost:3000'}/api/orders/webhook`,
             metadata: {
                 user_id: userId,
@@ -86,7 +91,6 @@ const createPayment = async (req, res) => {
         };
 
         if (paymentMethod === 'card') {
-            // Requisição de pagamento com Cartão de Crédito (tokenizado pelo Brick)
             if (!paymentData || !paymentData.token || !paymentData.installments) {
                 console.error('[MP_BACKEND_LOG] Erro 400: Dados do cartão incompletos no paymentData.');
                 return res.status(400).json({ message: 'Dados do cartão incompletos.' });
@@ -95,13 +99,12 @@ const createPayment = async (req, res) => {
             paymentRequestBody = {
                 ...paymentRequestBody,
                 payment_method_id: 'credit_card',
-                token: paymentData.token, // Token do cartão
+                token: paymentData.token,
                 installments: paymentData.installments,
                 issuer_id: paymentData.issuer_id,
             };
 
         } else if (paymentMethod === 'pix') {
-            // Requisição de pagamento com Pix
             paymentRequestBody = {
                 ...paymentRequestBody,
                 payment_method_id: 'pix',
@@ -135,7 +138,6 @@ const createPayment = async (req, res) => {
         } else if (mpPaymentStatus === 'rejected') {
             orderStatus = 'rejected';
         } 
-        // Se for Pix, o status será 'pending' no MP e no DB, esperando o pagamento
 
         // Cria o registro do pedido
         await models.Order.create({
@@ -144,7 +146,7 @@ const createPayment = async (req, res) => {
             status: orderStatus,
             transaction_amount: amount,
             purchase_type: purchaseType,
-            mp_preference_id: mpResponse.id, // Armazena o ID do pagamento
+            mp_preference_id: mpResponse.id,
             rent_expiry_date: rentExpiryDate,
         });
 
@@ -154,17 +156,14 @@ const createPayment = async (req, res) => {
         res.json(mpResponse);
 
     } catch (error) {
-        // Loga o erro completo para debug no console do servidor
         console.error('[MP_BACKEND_LOG] ❌ FATAL ERROR durante a criação do pagamento:', error);
         
-        // Tenta extrair a mensagem de erro da API do MP
         const mpErrorDetails = error.cause || [];
         const mpErrorMessage = error.message || mpErrorDetails.map(c => c.description).join('; ') || 'Erro ao processar pagamento no Mercado Pago.';
         
-        // Retorna o status 400 ou 500 dependendo da falha
         res.status(400).json({ 
             message: mpErrorMessage,
-            status_detail: error.status_detail // Detalhe do erro MP (útil para o frontend)
+            status_detail: error.status_detail 
         });
     }
 };
