@@ -4,7 +4,10 @@ const router = express.Router();
 const { mercadopagoClient } = require('./mp');
 const { protect } = require('./authMiddleware');
 
-// REMOVIDO: const models = global.solematesModels; // O acesso aqui pode ser muito cedo (undefined)
+// CORREÇÃO CRÍTICA: Acessa o objeto de modelos inicializados via global no topo
+// Desta forma, segue o padrão dos outros controllers e garante que o objeto 'models' 
+// esteja disponível no escopo do módulo.
+const models = global.solematesModels; 
 
 
 /**
@@ -13,15 +16,14 @@ const { protect } = require('./authMiddleware');
  * @access Private (Auth)
  */
 const createPayment = async (req, res) => {
-    // Acessa o objeto de modelos inicializados via global DENTRO DA FUNÇÃO
-    const models = global.solematesModels;
     
-    // --- CHECK CRÍTICO DE INICIALIZAÇÃO ---
+    // --- CHECK DE INICIALIZAÇÃO E MODELOS (Para Debug) ---
     if (!models || !models.Site || !models.Order) {
-        console.error('[MP_BACKEND_LOG] ❌ CRITICAL: Modelos do Banco de Dados não inicializados ou carregados corretamente.');
+        console.error('[MP_BACKEND_LOG] ❌ CRITICAL: Modelos do Banco de Dados (Site/Order) estão undefined. Verifique server.js e models.js.');
         return res.status(500).json({ message: 'Erro interno do servidor: Falha na inicialização dos modelos (Site/Order).' });
     }
     // -------------------------------------
+
 
     // Dados enviados pelo frontend (após o Card Brick tokenizar ou selecionar Pix)
     const { siteId, purchaseType, price, customer, paymentData, paymentMethod } = req.body;
@@ -37,7 +39,7 @@ const createPayment = async (req, res) => {
         return res.status(400).json({ message: 'Dados do pedido incompletos.' });
     }
     
-    // Se o middleware protect falhou, o 401 já teria sido enviado (verificamos por segurança)
+    // O erro 401 deve ser tratado pelo middleware 'protect' antes.
     if (!userId) {
          console.error('[MP_BACKEND_LOG] Erro 401: Tentativa de acesso sem autenticação válida.');
          return res.status(401).json({ message: 'Não autorizado, token ausente ou inválido.' });
@@ -118,6 +120,7 @@ const createPayment = async (req, res) => {
 
 
         // --- 3. CRIAÇÃO DO PAGAMENTO NA API DO MERCADO PAGO ---
+        // Se a correção deu certo, esta linha será executada
         const mpResponse = await mercadopagoClient.payments.create({ body: paymentRequestBody });
         
         console.log('[MP_BACKEND_LOG] Resposta da API do Mercado Pago recebida. Status:', mpResponse.status);
@@ -140,6 +143,7 @@ const createPayment = async (req, res) => {
         } 
 
         // Cria o registro do pedido
+        // Se este ponto for alcançado, o Pix ou Cartão foi processado pelo Mercado Pago
         await models.Order.create({
             user_id: userId,
             site_id: siteId,
