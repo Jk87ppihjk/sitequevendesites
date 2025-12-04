@@ -1,4 +1,4 @@
-// server.js (VERSÃO FINAL ESTRUTURALMENTE CORRIGIDA)
+// server.js (VERSÃO FINAL ESTRUTURALMENTE CORRIGIDA E ROBUSTA)
 const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
@@ -59,7 +59,6 @@ const initializeApp = async () => {
         
         // --- IMPORTAÇÃO E USO DAS ROTAS (CORREÇÃO ESTRUTURAL) ---
         // As rotas SÓ SÃO importadas APÓS a inicialização completa dos modelos.
-        // Isto resolve a falha de 'require' síncrono.
         const authRoutes = require('./authController');
         const siteRoutes = require('./siteController');
         const orderRoutes = require('./orderController');
@@ -75,7 +74,7 @@ const initializeApp = async () => {
         app.use('/api/files', fileRoutes); 
         // ---------------------------------------------------------
 
-        // --- Inicialização do Servidor ---
+        // --- Inicialização do Servidor (só ocorre após as rotas serem definidas) ---
         const PORT = process.env.PORT || 3000;
         app.listen(PORT, () => {
             console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
@@ -93,6 +92,7 @@ app.get('/', (req, res) => {
     res.send('API SoleMates Rodando! Conectada com MySQL e Cloudinary.');
 });
 
+// Este é o handler 404 final, ele só deve ser atingido se as rotas acima falharem.
 app.use((req, res, next) => {
     res.status(404).json({ message: `Rota não encontrada: ${req.originalUrl}` });
 });
