@@ -1,4 +1,3 @@
-
 // paymentController.js
 const express = require('express');
 const router = express.Router();
@@ -16,27 +15,48 @@ const models = global.solematesModels;
 const createPayment = async (req, res) => {
     // Dados enviados pelo frontend (após o Card Brick tokenizar ou selecionar Pix)
     const { siteId, purchaseType, price, customer, paymentData, paymentMethod } = req.body;
-    const userId = req.user.id;
+    // O req.user é definido pelo middleware 'protect'
+    const userId = req.user ? req.user.id : null; 
+
+    console.log(`[MP_BACKEND_LOG] Requisição de Pagamento recebida. Método: ${paymentMethod}, UserID: ${userId}`);
+    console.log('[MP_BACKEND_LOG] Dados do Cliente:', customer);
+    console.log('[MP_BACKEND_LOG] Dados do Pedido:', { siteId, purchaseType, price });
+
 
     if (!siteId || !price || !customer || !paymentMethod) {
+        console.error('[MP_BACKEND_LOG] Erro 400: Dados do pedido incompletos.');
         return res.status(400).json({ message: 'Dados do pedido incompletos.' });
     }
+    
+    // Se o middleware protect falhou, o userId será nulo (o 401 já teria sido enviado, mas verificamos por segurança)
+    if (!userId) {
+         console.error('[MP_BACKEND_LOG] Erro 401: Tentativa de acesso sem autenticação válida.');
+         return res.status(401).json({ message: 'Não autorizado, token ausente ou inválido.' });
+    }
+
 
     try {
         const site = await models.Site.findByPk(siteId);
         if (!site) {
+            console.error(`[MP_BACKEND_LOG] Erro 404: Site ID ${siteId} não encontrado.`);
             return res.status(404).json({ message: 'Site não encontrado.' });
         }
 
-        // --- 1. PREPARAÇÃO DOS DADOS DO PAGADOR ---
+        // --- 1. PREPARAÇÃO DOS DADOS DO PAGADOR (ROBUSTA) ---
         const amount = parseFloat(price);
         const rawDoc = customer.cpfCnpj.replace(/\D/g, '');
         const identificationType = rawDoc.length === 11 ? 'CPF' : 'CNPJ';
 
+        // Lógica mais robusta para split de nome
+        const nameParts = customer.fullName.trim().split(' ');
+        const firstName = nameParts[0] || 'Cliente';
+        // Se houver mais de uma palavra, o restante é o sobrenome, senão usa o nome completo
+        const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : nameParts[0]; 
+        
         const payer = {
             email: customer.email,
-            first_name: customer.fullName.split(' ')[0],
-            last_name: customer.fullName.split(' ').slice(1).join(' ') || '.', 
+            first_name: firstName,
+            last_name: lastName, 
             identification: {
                 type: identificationType,
                 number: rawDoc,
@@ -47,13 +67,17 @@ const createPayment = async (req, res) => {
                 street_number: customer.address.streetNumber,
             }
         };
+        console.log('[MP_BACKEND_LOG] Dados do Pagador formatados:', payer);
+
 
         // --- 2. MONTAGEM DO CORPO DA REQUISIÇÃO DO MERCADO PAGO ---
         let paymentRequestBody = {
             transaction_amount: amount,
             description: purchaseType === 'sale' ? `Compra do Site: ${site.name}` : `Aluguel do Site: ${site.name} (30 dias)`,
             payer: payer,
-            // Metadata para uso futuro
+            // URL de notificação para o Mercado Pago enviar atualizações (Webhook)
+            // Assumimos que BACKEND_URL está definido no .env
+            notification_url: `${process.env.BACKEND_URL || 'http://localhost:3000'}/api/orders/webhook`,
             metadata: {
                 user_id: userId,
                 site_id: siteId,
@@ -64,6 +88,7 @@ const createPayment = async (req, res) => {
         if (paymentMethod === 'card') {
             // Requisição de pagamento com Cartão de Crédito (tokenizado pelo Brick)
             if (!paymentData || !paymentData.token || !paymentData.installments) {
+                console.error('[MP_BACKEND_LOG] Erro 400: Dados do cartão incompletos no paymentData.');
                 return res.status(400).json({ message: 'Dados do cartão incompletos.' });
             }
 
@@ -82,11 +107,17 @@ const createPayment = async (req, res) => {
                 payment_method_id: 'pix',
             };
         } else {
+            console.error(`[MP_BACKEND_LOG] Erro 400: Método de pagamento inválido: ${paymentMethod}`);
             return res.status(400).json({ message: 'Método de pagamento inválido.' });
         }
 
+        console.log('[MP_BACKEND_LOG] Corpo FINAL da Requisição MP:', paymentRequestBody);
+
+
         // --- 3. CRIAÇÃO DO PAGAMENTO NA API DO MERCADO PAGO ---
         const mpResponse = await mercadopagoClient.payments.create({ body: paymentRequestBody });
+        
+        console.log('[MP_BACKEND_LOG] Resposta da API do Mercado Pago recebida. Status:', mpResponse.status);
         
         const mpPaymentStatus = mpResponse.status;
         const isRental = purchaseType === 'rent';
@@ -99,13 +130,12 @@ const createPayment = async (req, res) => {
             orderStatus = isRental ? 'rented' : 'completed';
             if (isRental) {
                 const now = new Date();
-                // Expira em 30 dias
                 rentExpiryDate = new Date(now.setDate(now.getDate() + 30));
             }
         } else if (mpPaymentStatus === 'rejected') {
             orderStatus = 'rejected';
         } 
-        // Se for Pix, o status inicial será 'pending' (aguardando pagamento)
+        // Se for Pix, o status será 'pending' no MP e no DB, esperando o pagamento
 
         // Cria o registro do pedido
         await models.Order.create({
@@ -114,23 +144,27 @@ const createPayment = async (req, res) => {
             status: orderStatus,
             transaction_amount: amount,
             purchase_type: purchaseType,
-            // Reutiliza o campo existente para armazenar o ID do pagamento direto
-            mp_preference_id: mpResponse.id, 
+            mp_preference_id: mpResponse.id, // Armazena o ID do pagamento
             rent_expiry_date: rentExpiryDate,
         });
 
+        console.log(`[MP_BACKEND_LOG] Pedido ID ${mpResponse.id} registrado no DB com status: ${orderStatus}`);
 
         // --- 5. RETORNA A RESPOSTA DO MERCADO PAGO PARA O FRONTEND ---
         res.json(mpResponse);
 
     } catch (error) {
-        console.error('Erro ao criar pagamento via Checkout Transparente:', error);
+        // Loga o erro completo para debug no console do servidor
+        console.error('[MP_BACKEND_LOG] ❌ FATAL ERROR durante a criação do pagamento:', error);
         
-        // Se o erro vier da API do MP, tentar extrair a mensagem de erro
-        const mpErrorMessage = error.message || error.cause?.map(c => c.description).join('; ') || 'Erro ao processar pagamento no Mercado Pago.';
+        // Tenta extrair a mensagem de erro da API do MP
+        const mpErrorDetails = error.cause || [];
+        const mpErrorMessage = error.message || mpErrorDetails.map(c => c.description).join('; ') || 'Erro ao processar pagamento no Mercado Pago.';
         
-        res.status(500).json({ 
-            message: mpErrorMessage 
+        // Retorna o status 400 ou 500 dependendo da falha
+        res.status(400).json({ 
+            message: mpErrorMessage,
+            status_detail: error.status_detail // Detalhe do erro MP (útil para o frontend)
         });
     }
 };
