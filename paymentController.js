@@ -4,7 +4,7 @@ const router = express.Router();
 const { mercadopagoClient } = require('./mp');
 const { protect } = require('./authMiddleware');
 
-// REMOVIDO: const models = global.solematesModels; // Removido para evitar o carregamento assíncrono
+// Não declaramos 'models' aqui para forçar o acesso dentro da função.
 
 /**
  * @route POST /api/payment/create-payment
@@ -12,12 +12,12 @@ const { protect } = require('./authMiddleware');
  * @access Private (Auth)
  */
 const createPayment = async (req, res) => {
-    // CORREÇÃO: Acessa o objeto de modelos dentro da função para garantir que esteja carregado
+    // CORREÇÃO ESTRUTURAL: Acessa o objeto de modelos dentro da função para garantir o carregamento
     const models = global.solematesModels; 
     
     // --- CHECK DE INICIALIZAÇÃO CRÍTICO ---
     if (!models || !models.Site || !models.Order) {
-        console.error('[MP_BACKEND_LOG] ❌ CRITICAL: Falha na inicialização do Sequelize. O objeto models.Order está undefined.');
+        console.error('[MP_BACKEND_LOG] ❌ CRITICAL: Falha na inicialização do Sequelize. O objeto models.Order está undefined. Verifique a ordem de carregamento em server.js.');
         return res.status(500).json({ message: 'Erro interno do servidor: Falha na inicialização dos modelos do banco de dados.' });
     }
     // -------------------------------------
@@ -29,7 +29,6 @@ const createPayment = async (req, res) => {
 
     console.log(`[MP_BACKEND_LOG] Requisição de Pagamento recebida. Método: ${paymentMethod}, UserID: ${userId}`);
     console.log('[MP_BACKEND_LOG] Dados do Cliente:', customer);
-    console.log('[MP_BACKEND_LOG] Dados do Pedido:', { siteId, purchaseType, price });
 
 
     if (!siteId || !price || !customer || !paymentMethod) {
@@ -73,7 +72,6 @@ const createPayment = async (req, res) => {
                 street_number: customer.address.streetNumber,
             }
         };
-        console.log('[MP_BACKEND_LOG] Dados do Pagador formatados:', payer);
 
 
         // --- 2. MONTAGEM DO CORPO DA REQUISIÇÃO DO MERCADO PAGO ---
@@ -138,7 +136,7 @@ const createPayment = async (req, res) => {
             orderStatus = 'rejected';
         } 
 
-        // Cria o registro do pedido
+        // Cria o registro do pedido - Esta linha deve funcionar após a correção de escopo.
         await models.Order.create({
             user_id: userId,
             site_id: siteId,
@@ -160,6 +158,7 @@ const createPayment = async (req, res) => {
         const mpErrorDetails = error.cause || [];
         const mpErrorMessage = error.message || mpErrorDetails.map(c => c.description).join('; ') || 'Erro ao processar pagamento no Mercado Pago.';
         
+        // Retorna 400 em caso de erro da API do MP
         res.status(400).json({ 
             message: mpErrorMessage,
             status_detail: error.status_detail 
