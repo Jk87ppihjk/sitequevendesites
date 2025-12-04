@@ -1,244 +1,172 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Checkout - SiteMarket</title>
+// ==========================
+// BACKEND (Node.js / Express)
+// ==========================
 
-  <!-- DEV: Tailwind CDN (em produção use build/CLI) -->
-  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+const express = require('express');
+const router = express.Router();
+const { mercadopagoClient } = require('./mp');
+const { protect } = require('./authMiddleware');
+const { Preference, Payment } = require('mercadopago');
+const models = global.solematesModels;
 
-  <!-- SDK Mercado Pago -->
-  <script src="https://sdk.mercadopago.com/js/v2"></script>
+// ==============================
+// CREATE PREFERENCE (CORRIGIDO)
+// ==============================
+const createPreference = async (req, res) => {
+    console.log("\n========= [createPreference] ==========");
+    console.log("[createPreference] Recebido do front:", req.body);
 
-  <style>
-    body { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
-    .fade-in { animation: fadeIn .4s ease-out forwards; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }
-  </style>
-</head>
-<body class="bg-gray-50 dark:bg-slate-900 text-slate-900 dark:text-slate-50">
+    const { siteId, purchaseType, price, siteName, customer } = req.body;
+    const userId = req.user.id;
 
-<div class="max-w-6xl mx-auto p-6">
-  <h1 class="text-3xl font-bold mb-6">Finalizar Compra</h1>
+    // Garantir número
+    const transactionPrice = Number(price);
 
-  <div id="feedback-msg" class="hidden mb-4 p-3 rounded font-semibold"></div>
+    if (!transactionPrice || isNaN(transactionPrice) || transactionPrice < 1) {
+        return res.status(400).json({
+            message: "O valor mínimo permitido pelo Mercado Pago é R$ 1,00."
+        });
+    }
 
-  <div class="grid lg:grid-cols-3 gap-8">
-    <aside class="lg:col-span-1">
-      <div class="p-4 bg-white dark:bg-slate-800 rounded shadow">
-        <h2 class="font-bold mb-3">Resumo</h2>
-        <div id="site-name-summary">Carregando...</div>
-        <div id="item-price-summary" class="font-bold mt-2">R$ 0,00</div>
-      </div>
-    </aside>
-
-    <section class="lg:col-span-2">
-      <form id="customer-form" class="p-6 bg-white dark:bg-slate-800 rounded shadow fade-in">
-        <label>Nome</label>
-        <input id="full-name" class="w-full p-2 border rounded mb-3" required/>
-        <label>Email</label>
-        <input id="email" type="email" class="w-full p-2 border rounded mb-3" required/>
-        <label>CPF/CNPJ</label>
-        <input id="cpf-cnpj" class="w-full p-2 border rounded mb-3" required/>
-
-        <div class="grid grid-cols-2 gap-3">
-          <input id="cep" placeholder="CEP" class="p-2 border rounded" required/>
-          <input id="address" placeholder="Rua" class="p-2 border rounded" required/>
-        </div>
-        <div class="grid grid-cols-3 gap-3 mt-3">
-          <input id="number" placeholder="Número" class="p-2 border rounded" required/>
-          <input id="city" placeholder="Cidade" class="p-2 border rounded" required/>
-          <input id="state" placeholder="UF" class="p-2 border rounded" required/>
-        </div>
-
-        <button id="go-to-payment-btn" class="mt-4 w-full bg-blue-600 text-white py-3 rounded font-bold">Ir para pagamento</button>
-      </form>
-
-      <div id="loading-payment" class="hidden mt-6 p-6 text-center">Conectando ao Mercado Pago...</div>
-
-      <!-- container do Brick -->
-      <div id="payment-brick-container" class="hidden mt-6 p-4 bg-white dark:bg-slate-800 rounded shadow"></div>
-    </section>
-  </div>
-</div>
-
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-  // CONFIG - atualize para seus valores
-  const MP_PUBLIC_KEY = 'TEST-COLOQUE_SUA_PUBLIC_KEY_AQUI'; // substitua pela public key válida (test/prod)
-  const API_BASE_URL = 'https://sitequevendesites.onrender.com/api';
-  const LOGIN_URL = 'login.html';
-  const SUCCESS_URL = 'compra-concluida.html';
-
-  const params = new URLSearchParams(window.location.search);
-  const siteId = params.get('siteId');
-  const purchaseType = params.get('type');
-  const price = Number(params.get('price'));
-
-  const token = localStorage.getItem('userToken');
-
-  const feedbackMsg = document.getElementById('feedback-msg');
-  const form = document.getElementById('customer-form');
-  const loading = document.getElementById('loading-payment');
-  const brickContainer = document.getElementById('payment-brick-container');
-
-  function showFeedback(msg, type='error') {
-    if (!msg) { feedbackMsg.classList.add('hidden'); return; }
-    feedbackMsg.classList.remove('hidden');
-    feedbackMsg.textContent = msg;
-    feedbackMsg.className = type === 'error' ? 'mb-4 p-3 rounded bg-red-100 text-red-700' : 'mb-4 p-3 rounded bg-green-100 text-green-700';
-    feedbackMsg.scrollIntoView({ behavior:'smooth', block:'center' });
-  }
-
-  async function init() {
-    if (!token) return window.location.href = LOGIN_URL;
-    if (!siteId || isNaN(price)) return showFeedback('Dados do pedido inválidos.', 'error');
-    if (price < 1) return showFeedback('Valor mínimo R$ 1,00.', 'error');
+    // CPF/CNPJ
+    const rawDoc = customer.cpfCnpj.replace(/\D/g, '');
+    const isCnpj = rawDoc.length > 11;
 
     try {
-      const r = await fetch(`${API_BASE_URL}/sites/${siteId}`);
-      const site = await r.json();
-      document.getElementById('site-name-summary').textContent = site.name || 'Site';
-      document.getElementById('item-price-summary').textContent = price.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-    } catch(e) { console.error('site load', e); }
-  }
+        // Verifica site
+        const site = await models.Site.findByPk(siteId);
+        if (!site) return res.status(404).json({ message: "Site não encontrado." });
 
-  form.addEventListener('submit', async (ev) => {
-    ev.preventDefault();
-    showFeedback('', '');
-    form.classList.add('hidden');
-    loading.classList.remove('hidden');
+        // Cria pedido local
+        const order = await models.Order.create({
+            user_id: userId,
+            site_id: siteId,
+            purchase_type: purchaseType,
+            transaction_amount: transactionPrice,
+            status: "pending"
+        });
 
-    const customer = {
-      fullName: document.getElementById('full-name').value.trim(),
-      email: document.getElementById('email').value.trim(),
-      cpfCnpj: document.getElementById('cpf-cnpj').value.trim(),
-      address: {
-        zipCode: document.getElementById('cep').value.trim(),
-        streetName: document.getElementById('address').value.trim(),
-        streetNumber: document.getElementById('number').value.trim(),
-        city: document.getElementById('city').value.trim(),
-        state: document.getElementById('state').value.trim()
-      }
-    };
+        console.log("[createPreference] Pedido criado: OrderID =", order.id);
 
-    // valida básica
-    if (!customer.fullName || !customer.email) {
-      loading.classList.add('hidden'); form.classList.remove('hidden'); return showFeedback('Nome e e-mail obrigatórios.');
-    }
-    const rawDoc = (customer.cpfCnpj || '').replace(/\D/g,'');
-    if (!rawDoc || rawDoc.length < 11) {
-      loading.classList.add('hidden'); form.classList.remove('hidden'); return showFeedback('CPF/CNPJ inválido.');
-    }
+        const preferenceModule = new Preference(mercadopagoClient);
+        const notificationUrl = `${process.env.BACKEND_URL}/api/payment/webhook?source=mercadopago`;
 
-    const body = {
-      siteId,
-      purchaseType,
-      price,
-      siteName: document.getElementById('site-name-summary').textContent,
-      customer
-    };
+        // Construção da preferência
+        const preferenceData = {
+            body: {
+                items: [
+                    {
+                        title:
+                            purchaseType === "sale"
+                                ? `Compra do Site: ${siteName}`
+                                : `Aluguel (30 dias) do Site: ${siteName}`,
+                        unit_price: Number(transactionPrice),
+                        quantity: 1,
+                        currency_id: "BRL"
+                    }
+                ],
 
-    try {
-      const resp = await fetch(`${API_BASE_URL}/payment/create-preference`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(body)
-      });
+                payer: {
+                    name: customer.fullName,
+                    email: customer.email,
+                    entity_type: isCnpj ? "association" : "individual",
+                    identification: {
+                        type: isCnpj ? "CNPJ" : "CPF",
+                        number: rawDoc
+                    },
+                    address: {
+                        zip_code: customer.address.zipCode,
+                        street_name: customer.address.streetName,
+                        street_number: customer.address.streetNumber
+                    }
+                },
 
-      const data = await resp.json();
-      if (!resp.ok) {
-        console.error('create-preference error:', data);
-        loading.classList.add('hidden'); form.classList.remove('hidden');
-        return showFeedback(data.message || 'Erro ao iniciar pagamento.', 'error');
-      }
+                back_urls: {
+                    success: `${process.env.FRONTEND_URL}/compra-concluida?orderId=${order.id}`,
+                    failure: `${process.env.FRONTEND_URL}/pagamento-falhou`,
+                    pending: `${process.env.FRONTEND_URL}/pagamento-pendente`
+                },
 
-      if (!data.preferenceId) {
-        loading.classList.add('hidden'); form.classList.remove('hidden');
-        console.error('Resposta sem preferenceId', data);
-        return showFeedback('Resposta inválida do servidor (preferenceId ausente).', 'error');
-      }
-
-      // guarantee amount present (backend returns amount)
-      if (typeof data.amount === 'undefined') data.amount = price;
-
-      // mostra container ANTES de renderizar
-      brickContainer.innerHTML = '';
-      brickContainer.classList.remove('hidden');
-
-      // renderiza Brick com preferenceId + amount (exigência atual)
-      await renderBrick(data.preferenceId, Number(data.amount));
-
-      loading.classList.add('hidden');
-    } catch (err) {
-      console.error('Erro ao chamar create-preference:', err);
-      loading.classList.add('hidden'); form.classList.remove('hidden');
-      showFeedback('Erro ao iniciar pagamento. Tente novamente.', 'error');
-    }
-  });
-
-  async function renderBrick(preferenceId, amount) {
-    if (!MP_PUBLIC_KEY || MP_PUBLIC_KEY.includes('COLOQUE')) {
-      throw new Error('Public key do Mercado Pago não configurada no front-end.');
-    }
-    try {
-      const mp = new MercadoPago(MP_PUBLIC_KEY, { locale: 'pt-BR' });
-      const bricks = mp.bricks();
-
-      const isDark = document.documentElement.classList.contains('dark') || document.body.classList.contains('dark');
-
-      const settings = {
-        initialization: {
-          preferenceId,
-          amount: Number(amount) // **obrigatório**
-        },
-        customization: {
-          paymentMethods: {
-            creditCard: 'all',
-            ticket: 'all',
-            bankTransfer: 'all'
-          },
-          visual: {
-            style: { theme: isDark ? 'dark' : 'default' }
-          }
-        },
-        callbacks: {
-          onReady: () => {
-            console.log('BRICK pronto');
-            brickContainer.scrollIntoView({ behavior:'smooth', block:'start' });
-          },
-          onError: (err) => {
-            console.error('BRICK error', err);
-            showFeedback('Erro ao carregar o formulário de pagamento. Verifique as configurações do Mercado Pago.', 'error');
-          },
-          onFinalization: (processResponse, error) => {
-            if (error) {
-              console.error('FINALIZATION error', error);
-              showFeedback('Falha no pagamento. Tente novamente.', 'error');
-              return;
+                auto_return: "approved",
+                external_reference: order.id.toString(),
+                notification_url: notificationUrl
             }
-            console.log('FINALIZATION', processResponse);
-            if (processResponse && processResponse.status === 'approved') {
-              showFeedback('Pagamento aprovado! Redirecionando...', 'success');
-              setTimeout(() => window.location.href = `${SUCCESS_URL}?orderId=${processResponse.id}`, 800);
-            } else {
-              showFeedback('Pagamento processado. Verifique instruções por e-mail.', 'success');
+        };
+
+        console.log("[createPreference] preferenceData criado corretamente.");
+
+        // Envia para Mercado Pago
+        const mpResponse = await preferenceModule.create(preferenceData);
+        console.log("[createPreference] Resposta MP recebida.");
+        console.log("[createPreference] mpResponse.id:", mpResponse.id);
+        console.log("[createPreference] mpResponse.init_point:", mpResponse.init_point);
+
+        order.mp_preference_id = mpResponse.id;
+        await order.save();
+
+        console.log("[createPreference] Preferência salva no pedido ✔️");
+
+        return res.json({
+            preferenceId: mpResponse.id,
+            initPoint: mpResponse.init_point
+        });
+
+    } catch (error) {
+        console.error("ERRO NO CREATE-PREFERENCE:", error);
+        return res.status(500).json({ message: "Erro interno ao criar preferência." });
+    }
+};
+
+// ==========================
+// WEBHOOK MERCADO PAGO
+// ==========================
+const handleWebhook = async (req, res) => {
+    const { topic, id } = req.query;
+    const paymentId = id || req.body?.data?.id || req.body?.id;
+
+    if ((topic === "payment" || req.body?.type === "payment") && paymentId) {
+        try {
+            const paymentModule = new Payment(mercadopagoClient);
+            const payment = await paymentModule.get({ id: paymentId });
+
+            const orderId = payment.external_reference;
+            if (!orderId) return res.status(200).send("OK");
+
+            const order = await models.Order.findByPk(orderId);
+            if (!order) return res.status(404).json({ message: "Pedido não encontrado." });
+
+            let newStatus = order.status;
+
+            if (payment.status === "approved") {
+                newStatus = order.purchase_type === "rent" ? "rented" : "completed";
+
+                if (order.purchase_type === "rent") {
+                    order.rent_expiry_date = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+                }
+
+            } else if (payment.status === "pending") {
+                newStatus = "pending";
+            } else if (payment.status === "rejected") {
+                newStatus = "rejected";
             }
-          }
+
+            order.status = newStatus;
+            await order.save();
+
+            return res.status(200).send("OK");
+
+        } catch (error) {
+            console.error("ERRO NO WEBHOOK:", error);
+            return res.status(500).send("Erro interno.");
         }
-      };
-
-      await bricks.create('payment', 'payment-brick-container', settings);
-    } catch (e) {
-      console.error('Erro ao renderizar Brick:', e);
-      showFeedback('Erro ao renderizar o formulário de pagamento.', 'error');
-      throw e;
     }
-  }
 
-  init();
-});
-</script>
-</body>
-</html>
+    return res.status(200).send("OK");
+};
+
+// ROTAS
+router.post("/create-preference", protect, createPreference);
+router.post("/webhook", handleWebhook);
+router.get("/webhook", (req, res) => res.send("Webhook ativo. Use POST."));
+
+module.exports = router;
